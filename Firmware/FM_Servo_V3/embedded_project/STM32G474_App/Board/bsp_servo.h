@@ -65,6 +65,26 @@
 #define BSP_CAL_BIAS_MAX_DV      (0.20f)          /* 两相偏置允许差，0.2 V ≈ 6.7 A */
 #define BSP_ENC_ERR_MAX          (5U)             /* 连续编码器异常次数 */
 
+/* ---- 编码器帧 CRC 校验与 SPI 自愈（2026-11-22）----
+ *
+ * 背景：MT6835 的 6 字节帧里 rx[5] 是 CRC-8（poly X8+X2+X+1，覆盖
+ * ANGLE[20:0]+STATUS[2:0] 共 24 位，见 Hardware/mt6835.txt:637）。
+ * 原实现只取角度与 STATUS，**从不校验 CRC**，于是"数据错位但 status 恰好
+ * 为 0"的帧会直接进控制环，只能靠角度跳变检测事后发现 —— 2026-11-18 与
+ * 11-22 两次 0x0002 都是这个形态（诊断位 status=0 但跳变饱和）。
+ *
+ * BSP_ENC_CRC_INIT：datasheet 未写明初值。取 0 是标准做法；若实测发现
+ * 上电即持续报编码器故障（err 饱和），说明初值应为 0xFF，改这里重烧即可。
+ *
+ * 自愈：连续 BSP_ENC_REINIT_N 帧坏（CRC/status/跳变任一）→ 在 1 ms 任务里
+ * 重建 SPI1（DeInit+Init=一次外设复位，清 OVR 与状态机异常）。两次故障历来
+ * 只能靠整机软复位恢复，而现场没人会去点复位，所以做成局部动作。
+ * 恢复后连续 BSP_ENC_OK_N 帧有效 → 按位清掉编码器故障，不需要人工介入。 */
+#define BSP_ENC_CRC_EN           (1)
+#define BSP_ENC_CRC_INIT         (0x00U)
+#define BSP_ENC_REINIT_N         (20U)
+#define BSP_ENC_OK_N             (200U)
+
 #define BSP_ENC_CS_PORT          GPIOC
 #define BSP_ENC_CS_PIN           GPIO_PIN_11      /* PC11 -> MT6835 CSN */
 #define BSP_ENC_FRAME_LEN        (6U)             /* 2B 命令 + 0x003~0x006 共 4B */
@@ -156,6 +176,9 @@ uint8_t           BspServo_GetCalReject(void);   /* 0=正常 1=偏置出窗 2=�
  * ^ 本身用开环拖动（虚拟角），完全不读编码器，所以这段屏蔽是安全的。
  * 只在 ^ 运行期间置 1，结束/中止时清 0；上电默认 0。 */
 void              BspServo_SetEncFaultMask(uint8_t on);
+/* 按位清故障（2026-11-22）：编码器自愈只能清自己那一位，
+ * 不能用 BspServo_ClearFault() 全清 —— 那会把过流/过压等更严重的故障一起抹掉。 */
+void              BspServo_ClearFaultBits(uint32_t mask);
 void              BspServo_GetCurrentBias(float *u, float *w);
 /* 从 Flash 恢复零漂：直接置"已标定"，跳过 200 ms 采样。
  * 只在 ParamStore_Load 成功且 CRC 通过后调用 —— 温漂大的场合仍应重新 C 一次。 */

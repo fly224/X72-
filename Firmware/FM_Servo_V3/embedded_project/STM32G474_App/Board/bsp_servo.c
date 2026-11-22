@@ -153,6 +153,13 @@ static volatile uint32_t s_cal_n;
 static volatile uint8_t  s_cal_state;      /* 0=未标定 1=标定中 2=已完成 */
 static volatile uint8_t  s_cal_why;
 static volatile uint8_t  s_enc_flt_mask;   /* 1 = 暂不置编码器故障（^ 运行期间） */        /* 标定被拒的原因：0=正常 1=偏置出窗 2=两相差过大 */
+static volatile uint8_t  s_enc_bad_run;    /* 连续坏帧数（CRC/status/跳变），触发 SPI 重建 */
+static volatile uint16_t s_enc_ok_run;     /* 连续有效帧数，达 BSP_ENC_OK_N 清编码器故障 */
+static volatile uint8_t  s_enc_reinit_req; /* 1 = 请求在 1 ms 任务里重建 SPI1 */
+static uint32_t          s_enc_rec_t0;     /* 重建限流窗口起点 */
+static uint8_t           s_enc_rec_n;      /* 窗口内已重建次数 */
+
+static void enc_spi_recover(void);         /* 定义在 MT6835 段，1 ms 任务要用 */
 
 /*
  * 过流判定消抖 + 现场留证。
@@ -414,6 +421,20 @@ HAL_StatusTypeDef BspServo_Init(void)
     if (st != HAL_OK) { FaultSet(BSP_FAULT_BSP_INIT); return st; }
 
     /* 5) 编码器先取一帧，保证首次控制节拍有有效角度 */
+
+    /* 4.9) SPI1 降速到 5.3 MHz（2026-11-22）
+     *
+     * CubeMX 配的是 Prescaler=16 → 170/16 = 10.6 MHz。MT6835 上限是 16 MHz
+     * （mt6835.txt:552），余量只有 34%；两次 0x0002 都指向偶发错位。
+     * 降到 /32 = 5.3 MHz 后，6 字节传输从 4.5 µs 变 9 µs，仍远小于 50 µs
+     * 控制周期，对时序没有影响，但采样裕度翻倍。
+     * 不直接改 spi.c：那是 CubeMX 生成文件，重新生成会被覆盖。
+     * 降速后紧接着 DeInit/Init，正好把外设拉到干净状态再开始读帧。 */
+    if (hspi1.Init.BaudRatePrescaler != SPI_BAUDRATEPRESCALER_32) {
+        hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
+        (void)HAL_SPI_DeInit(&hspi1);
+        (void)HAL_SPI_Init(&hspi1);
+    }
 
     /*
      * 注入触发实况快照（一次性）。
@@ -837,11 +858,108 @@ void BspServo_SlowTask1ms(void)
      * 放在最后 —— NTC 换算刚在上面更新，用最新值。 */
     thermal_update();
 
+    /* 编码器 SPI 自愈（2026-11-22）：连续坏帧（CRC/status/跳变）→ 重建 SPI1。
+     * 两次 0x0002 历来只能靠整机软复位恢复，而现场没人会去点复位；
+     * 这里改成几百微秒的局部动作，下一拍就能接上角度。
+     * 放在 1 ms 任务而不是 20 kHz ISR：DeInit+Init 要百微秒级，ISR 里做会超时。 */
+    if (s_enc_reinit_req != 0U) {
+        s_enc_reinit_req = 0U;
+        enc_spi_recover();
+    }
+
     /* 状态指示灯放最后：用本拍最新的 s_fault / s_pwm_enabled 判定。 */
     BspServo_LedTask1ms();
 }
 
 /* ---------------- MT6835 角度（DMA 异步，ISR 只读缓存） ---------------- */
+
+/* MT6835 帧的 CRC-8：poly X8+X2+X+1(=0x07)，ANGLE[20] 最先移入，
+ * 覆盖 ANGLE[20:0] + STATUS[2:0] 共 24 位（Hardware/mt6835.txt:637）。 */
+static uint8_t enc_crc8(uint32_t angle, uint8_t status)
+{
+    uint32_t data = ((angle & 0x1FFFFFUL) << 3) | ((uint32_t)status & 0x07UL);
+    uint8_t  crc  = (uint8_t)BSP_ENC_CRC_INIT;
+    int8_t   i;
+
+    for (i = 23; i >= 0; i--) {
+        const uint8_t bit = (uint8_t)((data >> (uint8_t)i) & 1UL);
+        const uint8_t fb  = (uint8_t)(((crc >> 7) & 1U) ^ bit);
+        crc = (uint8_t)(crc << 1);
+        if (fb != 0U) { crc ^= 0x07U; }
+    }
+    return crc;
+}
+
+/* 一帧无效：CRC 错 / status 非 0 / 角度越界 / 跳变，四条路径统一走这里。
+ * 分开维护计数会出现"某一类坏帧不触发自愈"的漏洞。 */
+static void enc_bad_frame(void)
+{
+    if (s_enc_err_cnt < 0xFFU) { s_enc_err_cnt++; }
+    if (s_enc_bad_run < 0xFFU) { s_enc_bad_run++; }
+    s_enc_ok_run = 0U;
+
+    if ((s_enc_flt_mask == 0U) && (s_enc_err_cnt >= BSP_ENC_ERR_MAX)) {
+        FaultSet(BSP_FAULT_ENCODER);
+    }
+    /* 连续坏帧达阈值就请求重建。^ 自校准期间不重建 —— 它不读编码器，
+     * 重建只会干扰开环拖动。 */
+    if ((s_enc_flt_mask == 0U) && (s_enc_bad_run >= BSP_ENC_REINIT_N)) {
+        s_enc_reinit_req = 1U;
+    }
+}
+
+/* 重建 SPI1。调用者保证 s_spi_busy == 0（没有在途 DMA）。
+ *
+ * 为什么不是"只清 OVR 了事"：两次 0x0002（11-18、11-22）的表现都是
+ * "帧看似合法但角度乱跳"，异常不在单个标志上，而是外设/DMA 状态已错位。
+ * DeInit 会 FORCE_RESET 外设并走 MspDeInit（关时钟、复位 PB3/4/5、拆 DMA、
+ * 关 NVIC），Init 再完整重建 —— 等价于把 SPI1 拉回刚上电的状态。
+ * 代价约百微秒，只在持续坏帧时走一次。 */
+static void enc_spi_recover(void)
+{
+    const uint32_t now = HAL_GetTick();
+
+    if (s_spi_busy != 0U) { return; }         /* 有传输在跑，下拍再来 */
+
+    /* 限流：100 ms 窗口内最多重建 3 次。
+     * 必要性：若坏帧是"持续性的"（例如 CRC 初值配错、编码器没供电），
+     * 不做限流就会每 20 帧请求一次，变成每 2.5 ms 重建一次 SPI ——
+     * 既拖垮 1 ms 任务，也让角度永远接不上。限流后保持故障位等人工处理，
+     * 这也是我们希望暴露而不是掩盖的情形。 */
+    if ((uint32_t)(now - s_enc_rec_t0) >= 100U) {
+        s_enc_rec_t0 = now;
+        s_enc_rec_n  = 0U;
+    }
+    if (s_enc_rec_n >= 3U) {
+        s_enc_reinit_req = 0U;
+        return;
+    }
+    s_enc_rec_n++;
+
+    s_spi_busy = 1U;                          /* 占锁：20 kHz ISR 不再发起新传输 */
+    EncCsHigh();
+    (void)HAL_SPI_DeInit(&hspi1);
+    if (HAL_SPI_Init(&hspi1) != HAL_OK) {
+        s_spi_busy = 0U;
+        FaultSet(BSP_FAULT_SPI);
+        return;
+    }
+
+    /* 重建基准：不清 s_enc_seen，重建后第一帧会被判成跳变、立刻又进坏帧计数，
+     * 刚恢复就开始下一轮拉锯。 */
+    s_enc_seen     = 0U;
+    s_enc_err_cnt  = 0U;
+    s_enc_jump_cnt = 0U;
+    s_enc_bad_run  = 0U;
+    s_enc_ok_run   = 0U;
+    s_spi_busy     = 0U;                      /* 放开，ISR 下一拍重新发起 */
+}
+
+void BspServo_ClearFaultBits(uint32_t mask)
+{
+    s_fault &= ~mask;
+}
+
 HAL_StatusTypeDef BspServo_StartEncoderDma(void)
 {
     if (s_spi_busy) return HAL_BUSY;
@@ -873,11 +991,20 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 
     if (status != 0U || angle >= (uint32_t)BSP_ENC_COUNTS) {
         /* 保留上一帧有效角度，避免坏帧污染控制环 */
-        if ((++s_enc_err_cnt >= BSP_ENC_ERR_MAX) && (s_enc_flt_mask == 0U)) {
-            FaultSet(BSP_FAULT_ENCODER);
-        }
+        enc_bad_frame();
         return;
     }
+
+#if (BSP_ENC_CRC_EN != 0)
+    /* CRC 校验（2026-11-22 新增）：MT6835 自己给出 24 位的 CRC-8，而原实现
+     * 拿了 rx[5] 却从不校验。缺了这一步，"数据错位但 status 恰好为 0"的帧
+     * 会直接进控制环，只能靠下面的跳变检测事后发现 —— 11-18 与 11-22 两次
+     * 0x0002 都是这个形态（诊断位 status=0、跳变饱和）。 */
+    if (enc_crc8(angle, status) != s_enc_rx[5]) {
+        enc_bad_frame();
+        return;
+    }
+#endif
 
     /* 角度连续性（2026-11-17 新增）：
      * status 位和越界检查抓不到"位翻转但数值仍合法"的帧，而那种帧会让电角度
@@ -893,15 +1020,29 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
         if (d < 0)     { d = -d; }
 
         if ((uint32_t)d > BSP_ENC_JUMP_MAX) {
-            if ((++s_enc_jump_cnt >= BSP_ENC_JUMP_N) && (s_enc_flt_mask == 0U)) {
+            if (s_enc_jump_cnt < 0xFFU) { s_enc_jump_cnt++; }
+            /* 跳变保留 3 帧即报警（比帧错误更敏感：位置环会把跳变当成真实位移去追） */
+            if ((s_enc_jump_cnt >= BSP_ENC_JUMP_N) && (s_enc_flt_mask == 0U)) {
                 FaultSet(BSP_FAULT_ENCODER);
             }
+            enc_bad_frame();
             return;                       /* 丢这一帧，继续用上一帧角度 */
         }
     }
     s_enc_jump_cnt = 0U;
     s_enc_seen = 1U;
     s_enc_err_cnt = 0U;
+    s_enc_bad_run = 0U;
+
+    /* 连续有效帧够多 = SPI 确实恢复了 → 按位清掉编码器故障，不再需要人工软复位。
+     * 只清这一位：过流/过压等更严重的故障不能被自愈顺手抹掉。 */
+    if (s_enc_ok_run < BSP_ENC_OK_N) {
+        s_enc_ok_run++;
+        if (s_enc_ok_run >= BSP_ENC_OK_N) {
+            BspServo_ClearFaultBits(BSP_FAULT_ENCODER);
+        }
+    }
+
     s_enc_raw = angle;
     s_enc_status = status;
 }
