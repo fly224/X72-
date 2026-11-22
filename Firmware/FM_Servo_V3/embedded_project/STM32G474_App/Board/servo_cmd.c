@@ -247,6 +247,7 @@ static CMD_NOINLINE void apply_spd_gains(void)
 
 static void do_disable(const char *why)
 {
+    (void)why;
     /* 顺序：先封 MOE（立即断输出），再清使能，最后占空比回中 */
     BspServo_PwmEnable(0U);
     Servo_SetEnable(0U);

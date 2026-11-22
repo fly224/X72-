@@ -14,6 +14,11 @@
 
 ### 修复
 
+- **CAN L1 失效安全误 Disarm**（`can_proto.c`）。`s_cmd_age` 初始 `0xFFFF`（从未收到
+  CMD_AGG）且原逻辑无条件计时，导致 PROD_BUILD 上电第一个 1 ms 拍就触发失效安全、
+  `ServoCmd_Disarm()`，把 MAVLink 串口使能的电机立即封锁——表现就是"下发使能 ACK 成功、
+  电机 0.1 s 内又失能、不动"。新增 `s_cmd_ever` 门控：失效安全只在"主站曾上线（收到过
+  CMD_AGG）"后才计时并断使能；主站没上过线则不强制 Disarm，MAVLink 串口调试恢复正常
 - **编码器帧从不校验 CRC**（`bsp_servo.c`）。MT6835 的 6 字节帧里 `rx[5]` 是 CRC-8
   （poly `X8+X2+X+1`，覆盖 `ANGLE[20:0]+STATUS[2:0]` 共 24 位），原实现只取角度与
   STATUS，于是"数据错位但 status 恰好为 0"的帧会直接进控制环，只能靠跳变检测事后发现。

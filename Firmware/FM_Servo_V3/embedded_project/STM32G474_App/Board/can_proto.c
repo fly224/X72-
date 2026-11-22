@@ -326,6 +326,7 @@ static volatile uint32_t s_rx_resync;   /* seq 大跳变：对端重启/断流�
 static volatile uint32_t s_rx_zero;     /* 收到 seq==0 的次数：对端重启证据 */
 static uint16_t s_cmd_age;              /* L1：距上一条有效 CMD_AGG 的 ms 数 */
 static uint8_t  s_cmd_to;               /* L1：10 ms 无指令已置超时 */
+static uint8_t  s_cmd_ever;             /* L1：是否收到过 CMD_AGG（主站是否曾上线） */
 static uint8_t s_rc_div;                /* bus-off 恢复检查分频（10 拍 = 10 ms） */
 static volatile uint32_t s_rc_cnt;      /* bus-off 自动恢复次数（诊断） */
 static uint16_t s_rep_div;              /* 周期上报分频：1000 拍 = 1 s */
@@ -1021,6 +1022,7 @@ void CanProto_L1Start(uint8_t selftest)
     s_agg.n_slots   = 0u;
     s_cmd_age       = 0xFFFFu;
     s_cmd_to        = 0u;
+    s_cmd_ever      = 0u;
     s_l1_cyc        = 0u;
     s_diag_div      = 0u;
     s_hb_div        = 0u;
@@ -1058,6 +1060,7 @@ static void can_l1_rx(void)
                     s_agg      = tmp;
                     s_cmd_age  = 0u;
                     s_cmd_to   = 0u;
+                    s_cmd_ever = 1u;      /* 主站上线：之后断流才需要失效安全 */
                     s_rx_ok++;                 /* 已解析的聚合指令数 */
                     can_l1_apply(&s_agg);
                     if (s_l1_st != 0u) {
@@ -1087,21 +1090,29 @@ void CanProto_L1Task1ms(void)
 
     can_l1_rx();
 
-    /* 失效安全：连续 CAN_AGG_TMO_MS 无有效指令就置超时（上层据此进阻尼） */
-    if (s_cmd_age < 0xFFFFu) { s_cmd_age++; }
-    if ((s_cmd_age > CAN_AGG_TMO_MS) && (s_cmd_to == 0u)) {
-        s_cmd_to = 1u;
-        /* 第一级：先阻尼，不要一上来就断使能。
-         * MIT 下 kp=0、kd 保持，等效于给转子一个黏滞阻力，
-         * 对腿关节比"自由停车"安全（不会因重力直接掉下来）。 */
-        if (AppParam_GetActiveMode() == APP_OP_MODE_MIT) {
-            (void)AppParam_SetMitCmd(BspServo_GetThetaMulti(), 0.0f,
-                                     0.0f, CAN_DAMP_KD, 0.0f);
+    /* 失效安全：只在主站**曾经上线**（收到过 CMD_AGG）后才计时并断使能。
+     *
+     * 2026-11-22 实测根因：s_cmd_age 初始 0xFFFF，且原来无条件计时，
+     * 于是上电第一个 1 ms 拍就置 s_cmd_to、60 ms 后 Disarm ——
+     * 把 MAVLink 串口调试的使能也一起封掉，现象是"使能成功、0.1 s 内
+     * 又失能、电机不动"。加 s_cmd_ever 门控后：主站没上过线就不强制
+     * Disarm，MAVLink 调试恢复正常；主站上过线再断流，才走阻尼→断使能。 */
+    if (s_cmd_ever != 0u) {
+        if (s_cmd_age < 0xFFFFu) { s_cmd_age++; }
+        if ((s_cmd_age > CAN_AGG_TMO_MS) && (s_cmd_to == 0u)) {
+            s_cmd_to = 1u;
+            /* 第一级：先阻尼，不要一上来就断使能。
+             * MIT 下 kp=0、kd 保持，等效于给转子一个黏滞阻力，
+             * 对腿关节比"自由停车"安全（不会因重力直接掉下来）。 */
+            if (AppParam_GetActiveMode() == APP_OP_MODE_MIT) {
+                (void)AppParam_SetMitCmd(BspServo_GetThetaMulti(), 0.0f,
+                                         0.0f, CAN_DAMP_KD, 0.0f);
+            }
         }
-    }
-    /* 第二级：阻尼后仍持续无指令 → 断使能封锁输出 */
-    if ((s_cmd_to != 0u) && (s_cmd_age >= (CAN_AGG_TMO_MS + CAN_DISARM_MS))) {
-        if (ServoCmd_IsArmed() != 0u) { (void)ServoCmd_Disarm(); }
+        /* 第二级：阻尼后仍持续无指令 → 断使能封锁输出 */
+        if ((s_cmd_to != 0u) && (s_cmd_age >= (CAN_AGG_TMO_MS + CAN_DISARM_MS))) {
+            if (ServoCmd_IsArmed() != 0u) { (void)ServoCmd_Disarm(); }
+        }
     }
 
     /* 协议自环：自己发一帧 CMD_AGG，收到后由 can_l1_verify 逐字段比对 */
