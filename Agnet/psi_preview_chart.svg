@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="560" viewBox="0 0 900 560" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+<rect width="900" height="560" fill="#ffffff"/>
+<text x="96" y="32" font-size="17" font-weight="600" fill="#1a1a1a">ψ / R 温度漂移（4 点，42.5→44.7 °C）</text>
+<rect x="96" y="66" width="700" height="428" fill="#fafbfc" stroke="#e3e6ea"/>
+<line x1="96" y1="66.0" x2="796" y2="66.0" stroke="#eceff3"/>
+<text x="87" y="70.0" font-size="10.5" fill="#2f7fd1" text-anchor="end">4.279</text>
+<text x="805" y="70.0" font-size="10.5" fill="#e05545" text-anchor="start">342.3</text>
+<line x1="96" y1="151.6" x2="796" y2="151.6" stroke="#eceff3"/>
+<text x="87" y="155.6" font-size="10.5" fill="#2f7fd1" text-anchor="end">4.273</text>
+<text x="805" y="155.6" font-size="10.5" fill="#e05545" text-anchor="start">341.9</text>
+<line x1="96" y1="237.2" x2="796" y2="237.2" stroke="#eceff3"/>
+<text x="87" y="241.2" font-size="10.5" fill="#2f7fd1" text-anchor="end">4.267</text>
+<text x="805" y="241.2" font-size="10.5" fill="#e05545" text-anchor="start">341.5</text>
+<line x1="96" y1="322.8" x2="796" y2="322.8" stroke="#eceff3"/>
+<text x="87" y="326.8" font-size="10.5" fill="#2f7fd1" text-anchor="end">4.262</text>
+<text x="805" y="326.8" font-size="10.5" fill="#e05545" text-anchor="start">341.1</text>
+<line x1="96" y1="408.4" x2="796" y2="408.4" stroke="#eceff3"/>
+<text x="87" y="412.4" font-size="10.5" fill="#2f7fd1" text-anchor="end">4.256</text>
+<text x="805" y="412.4" font-size="10.5" fill="#e05545" text-anchor="start">340.7</text>
+<line x1="96" y1="494.0" x2="796" y2="494.0" stroke="#eceff3"/>
+<text x="87" y="498.0" font-size="10.5" fill="#2f7fd1" text-anchor="end">4.250</text>
+<text x="805" y="498.0" font-size="10.5" fill="#e05545" text-anchor="start">340.4</text>
+<line x1="96.0" y1="66" x2="96.0" y2="494" stroke="#f2f4f7"/>
+<text x="96.0" y="512" font-size="10.5" fill="#6b7280" text-anchor="middle">45.7</text>
+<line x1="271.0" y1="66" x2="271.0" y2="494" stroke="#f2f4f7"/>
+<text x="271.0" y="512" font-size="10.5" fill="#6b7280" text-anchor="middle">44.6</text>
+<line x1="446.0" y1="66" x2="446.0" y2="494" stroke="#f2f4f7"/>
+<text x="446.0" y="512" font-size="10.5" fill="#6b7280" text-anchor="middle">43.6</text>
+<line x1="621.0" y1="66" x2="621.0" y2="494" stroke="#f2f4f7"/>
+<text x="621.0" y="512" font-size="10.5" fill="#6b7280" text-anchor="middle">42.5</text>
+<line x1="796.0" y1="66" x2="796.0" y2="494" stroke="#f2f4f7"/>
+<text x="796.0" y="512" font-size="10.5" fill="#6b7280" text-anchor="middle">41.5</text>
+<text x="20" y="280" font-size="12" fill="#2f7fd1" transform="rotate(-90 20 280)" text-anchor="middle">ψ (mWb)</text>
+<text x="882" y="280" font-size="12" fill="#e05545" transform="rotate(90 882 280)" text-anchor="middle">R (mΩ)</text>
+<text x="446" y="542" font-size="12" fill="#374151" text-anchor="middle">电机 NTC 温度 (°C)</text>
+<line x1="96.0" y1="29.2" x2="796.0" y2="575.3" stroke="#2f7fd1" stroke-width="2.2" stroke-dasharray="7 4" opacity="0.85"/>
+<line x1="96.0" y1="441.4" x2="796.0" y2="32.3" stroke="#e05545" stroke-width="2.2" stroke-dasharray="7 4" opacity="0.85"/>
+<circle cx="260.7" cy="137.3" r="3.6" fill="#2f7fd1" opacity="0.85"/>
+<circle cx="428.7" cy="317.5" r="3.6" fill="#2f7fd1" opacity="0.85"/>
+<circle cx="522.6" cy="377.6" r="3.6" fill="#2f7fd1" opacity="0.85"/>
+<circle cx="631.3" cy="422.7" r="3.6" fill="#2f7fd1" opacity="0.85"/>
+<circle cx="260.7" cy="404.8" r="3.6" fill="#e05545" opacity="0.7"/>
+<circle cx="428.7" cy="155.2" r="3.6" fill="#e05545" opacity="0.7"/>
+<circle cx="522.6" cy="159.6" r="3.6" fill="#e05545" opacity="0.7"/>
+<circle cx="631.3" cy="193.1" r="3.6" fill="#e05545" opacity="0.7"/>
+<rect x="112" y="80" width="336" height="96" rx="6" fill="#ffffff" fill-opacity="0.94" stroke="#d7dce3"/>
+<text x="124" y="102" font-size="12" fill="#1a1a1a">ψ(T) = 4.6359 -0.008556·T  (R²=0.956)</text>
+<text x="124" y="124" font-size="12" fill="#2f7fd1">α_ψ = -0.192 %/K　→ 10 K 变化 -1.92%</text>
+<text x="124" y="146" font-size="12" fill="#e05545">α_R = +0.130 %/K　→ 10 K 变化 +1.30%</text>
+<text x="124" y="166" font-size="11" fill="#6b7280">ψ20=4.4648 mWb  R20=331.32 mΩ  Kt20=0.0938 N·m/A</text>
+</svg>

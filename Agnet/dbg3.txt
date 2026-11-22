@@ -1,0 +1,2 @@
+  30056 mode=12 → SUCCESS            回读=12
+idx 179 clean= 'mit T=0.00 p'

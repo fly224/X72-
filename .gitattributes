@@ -1,0 +1,29 @@
+# 统一换行：仓库内一律 LF，检出时不转换
+* text=auto eol=lf
+
+# 二进制：禁止换行转换与 diff（否则 PDF/固件/库会被静默损坏）
+*.pdf   binary
+*.PDF   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.bmp   binary
+*.ico   binary
+*.bin   binary
+*.axf   binary
+*.hex   binary
+*.elf   binary
+*.a     binary
+*.lib   binary
+*.o     binary
+*.mat   binary
+*.slxc  binary
+*.xlsx  binary
+*.xls   binary
+*.docx  binary
+*.pptx  binary
+*.zip   binary
+*.7z    binary
+*.enet  binary
+*.svd   binary

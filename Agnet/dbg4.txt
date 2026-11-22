@@ -1,0 +1,5 @@
+  30056 mode=12 → SUCCESS            回读=12
+try0: cl='��� \x00\x009\x01\x01Ku\x00�(���\x15*=�;h=��(>N�=��(���\x15*=�;h=U��\x0c\x00\x00:\x01\x01Xu\x00�����������A!�' match=None
+try1: cl="�'� \x00\x00�\x01\x01Ku\x00-���h��=�\x1a�<�T\x14=�&��-���h��=�\x1a�<�\r�\x0c\x00\x00�\x01\x01Xu\x00\x03�������`��A\x1cq" match=None
+try2: cl=' g� \x00\x00M\x01\x01Ku\x00�B��<:E�ul�=�\x1e�<�!���B��<:E�ul�=���\x0c\x00\x00N\x01\x01Xu\x00�����������A��' match=None
+mode: 12 1 0

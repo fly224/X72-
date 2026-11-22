@@ -1,0 +1,16 @@
+*** Using Compiler 'V6.24', folder: 'E:\keil5c51\51\ARM\ARMCLANG\Bin'
+Build target 'X72_FOC'
+../Board/can_proto.c(74): error: call to undeclared function 'can_enter_init'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+   74 |     can_enter_init();
+      |     ^
+../Board/can_proto.c(329): error: static declaration of 'can_enter_init' follows non-static declaration
+  329 | static void can_enter_init(void)
+      |             ^
+../Board/can_proto.c(74): note: previous implicit declaration is here
+   74 |     can_enter_init();
+      |     ^
+2 errors generated.
+compiling can_proto.c...
+"X72_FOC\X72_FOC.axf" - 2 Error(s), 0 Warning(s).
+Target not created.
+Build Time Elapsed:  00:00:01

@@ -1,0 +1,13 @@
+*** Using Compiler 'V6.24', folder: 'E:\keil5c51\51\ARM\ARMCLANG\Bin'
+Build target 'X72_FOC'
+../Board/can_proto.c(466): error: use of undeclared identifier 's_cmd_age'
+  466 |         v8[1] = (float)s_cmd_age;
+      |                        ^
+../Board/can_proto.c(467): error: use of undeclared identifier 's_cmd_to'
+  467 |         v8[2] = (float)s_cmd_to;
+      |                        ^
+2 errors generated.
+compiling can_proto.c...
+"X72_FOC\X72_FOC.axf" - 2 Error(s), 0 Warning(s).
+Target not created.
+Build Time Elapsed:  00:00:01

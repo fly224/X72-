@@ -1,0 +1,80 @@
+*** Using Compiler 'V6.24', folder: 'E:\keil5c51\51\ARM\ARMCLANG\Bin'
+Build target 'X72_FOC'
+compiling main.c...
+compiling motor_ident.c...
+compiling motor_rl_ident.c...
+compiling param_store.c...
+compiling bsp_servo.c...
+compiling telemetry_tx.c...
+compiling servo_cmd.c...
+compiling encoder_cal.c...
+../Board/can_proto.c(961): error: use of undeclared identifier 'CAN_SLOT_ID'
+  961 |     uint8_t slot = (uint8_t)CAN_SLOT_ID;
+      |                             ^
+../Board/can_proto.c(975): error: use of undeclared identifier 'CAN_GEAR_RATIO'
+  975 |         (void)AppParam_SetMitCmd(c->q_des[slot]  * CAN_GEAR_RATIO,
+      |                                                    ^
+../Board/can_proto.c(976): error: use of undeclared identifier 'CAN_GEAR_RATIO'
+  976 |                                  c->dq_des[slot] * CAN_GEAR_RATIO,
+      |                                                    ^
+../Board/can_proto.c(978): error: use of undeclared identifier 'CAN_GEAR_RATIO'
+  978 |                                  c->tau_ff[slot] / CAN_GEAR_RATIO);
+      |                                                    ^
+../Board/can_proto.c(981): error: use of undeclared identifier 'CAN_GEAR_RATIO'
+  981 |         (void)AppParam_SetPosP(c->q_des[slot] * CAN_GEAR_RATIO);
+      |                                                 ^
+../Board/can_proto.c(1053): error: use of undeclared identifier 'CAN_ID_CMD_AGG'
+ 1053 |         case CAN_ID_CMD_AGG:
+      |              ^
+../Board/can_proto.c(1071): error: use of undeclared identifier 'CAN_ID_SYNC'
+ 1071 |         case CAN_ID_SYNC:
+      |              ^
+../Board/can_proto.c(1091): error: use of undeclared identifier 'CAN_AGG_TMO_MS'
+ 1091 |     if ((s_cmd_age > CAN_AGG_TMO_MS) && (s_cmd_to == 0u)) {
+      |                      ^
+../Board/can_proto.c(1098): error: use of undeclared identifier 'CAN_DAMP_KD'
+ 1098 |                                      0.0f, CAN_DAMP_KD, 0.0f);
+      |                                            ^
+../Board/can_proto.c(1102): error: use of undeclared identifier 'CAN_AGG_TMO_MS'
+ 1102 |     if ((s_cmd_to != 0u) && (s_cmd_age >= (CAN_AGG_TMO_MS + CAN_DISARM_MS))) {
+      |                                            ^
+../Board/can_proto.c(1102): error: use of undeclared identifier 'CAN_DISARM_MS'
+ 1102 |     if ((s_cmd_to != 0u) && (s_cmd_age >= (CAN_AGG_TMO_MS + CAN_DISARM_MS))) {
+      |                                                             ^
+../Board/can_proto.c(1112): error: use of undeclared identifier 'CAN_ID_CMD_AGG'
+ 1112 |         (void)can_l1_send(CAN_ID_CMD_AGG, buf, FDCAN_DLC_BYTES_64);
+      |                           ^
+../Board/can_proto.c(1125): error: use of undeclared identifier 'CAN_GEAR_RATIO'
+ 1125 |         f.q_act      = BspServo_GetThetaMulti() / CAN_GEAR_RATIO;
+      |                                                   ^
+../Board/can_proto.c(1126): error: use of undeclared identifier 'CAN_GEAR_RATIO'
+ 1126 |         f.dq_act     = BspServo_GetOmegaMech() / CAN_GEAR_RATIO;
+      |                                                  ^
+../Board/can_proto.c(1127): error: use of undeclared identifier 'CAN_KT_NM_PER_A'
+ 1127 |         f.tau_act    = iq_m * CAN_KT_NM_PER_A * Servo_GetKtComp() * CAN_GEAR_RATIO;
+      |                               ^
+../Board/can_proto.c(1127): error: use of undeclared identifier 'CAN_GEAR_RATIO'
+ 1127 |         f.tau_act    = iq_m * CAN_KT_NM_PER_A * Servo_GetKtComp() * CAN_GEAR_RATIO;
+      |                                                                     ^
+../Board/can_proto.c(1134): error: use of undeclared identifier 'CAN_ID_FB_MOTION'
+ 1134 |         (void)can_l1_send((uint16_t)(CAN_ID_FB_MOTION + CAN_NODE_ID), buf,
+      |                                      ^
+../Board/can_proto.c(1134): error: use of undeclared identifier 'CAN_NODE_ID'
+ 1134 |         (void)can_l1_send((uint16_t)(CAN_ID_FB_MOTION + CAN_NODE_ID), buf,
+      |                                                         ^
+../Board/can_proto.c(1139): error: use of undeclared identifier 'CAN_HB_DIV_MS'
+ 1139 |     if (++s_hb_div >= CAN_HB_DIV_MS) {
+      |                       ^
+fatal error: too many errors emitted, stopping now [-ferror-limit=]
+20 errors generated.
+compiling can_proto.c...
+compiling fric_cal.c...
+compiling servo_isr.c...
+compiling cog_ff.c...
+compiling motor_flux_ident.c...
+compiling mech_ident.c...
+compiling app_param.c...
+compiling mavlink_host.c...
+"X72_FOC\X72_FOC.axf" - 19 Error(s), 0 Warning(s).
+Target not created.
+Build Time Elapsed:  00:00:03

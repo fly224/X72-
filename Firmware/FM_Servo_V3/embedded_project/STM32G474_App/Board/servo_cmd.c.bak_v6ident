@@ -1,0 +1,472 @@
+/*
+ * servo_cmd.c —— 串口单字符调试命令（首次上电联调用的最小使能入口）
+ *
+ * 为什么要有这一层：固件原本没有任何使能入口（Servo_SetEnable / BspServo_PwmEnable(1)
+ * 均无调用者），BDTR.MOE 恒为 0，电机永远不可能通电。但"直接放开"又不行 ——
+ * 电流零点未标定时 iw 有 -1.41 A 的虚假读数，闭环一使能就会输出错误力矩。
+ * 所以这里做成"先标定、才允许使能"的联锁，并加 deadman 超时自动封锁。
+ *
+ * 命令（单字符，921600 8N1）：
+ *   C  电流零点标定（要求 MOE=0、电机静止，约 200 ms）
+ *   E  使能（要求已标定 + 无故障）→ 置 MOE=1，同时启动 2 s deadman
+ *   D  禁用（先封锁 MOE，再清使能，占空比回中）
+ *   F  速度模式，+30 rpm      R  速度模式，-30 rpm
+ *   P  位置模式（保持当前角度）
+ *   S  状态回读
+ *   X  清故障（要求 MOE=0）
+ *   ?  帮助
+ *
+ * 任何命令都会重置 deadman；2 s 内无命令自动封锁输出。
+ */
+#include "servo_cmd.h"
+#include "bsp_servo.h"
+#include "uart_link.h"
+#include "usart.h"
+
+#include <string.h>
+
+#define CMD_DEADMAN_MS   2000U
+#define CMD_LINE_MAX     200U
+#define CMD_Q_LEN        8U
+#define CMD_RPM_TEST     3.0f                   /* F/R 用的转速：首次联调先给 3 rpm，
+                                                 * 确认编码器方向与相序一致后再调大 */
+#define CMD_RAD_PER_RPM  (0.10471975512f)       /* 2π/60 */
+
+static volatile uint8_t  s_q[CMD_Q_LEN];
+static volatile uint8_t  s_qh;
+static volatile uint8_t  s_qt;
+static volatile uint8_t  s_kill;
+static volatile uint16_t s_deadman;
+static uint8_t           s_armed;
+
+/* 电角度对齐状态机：0=空闲 1=吸合中 */
+static volatile uint8_t  s_align;
+static volatile uint16_t s_align_t;
+
+#define CMD_ALIGN_RAMP_MS 200U              /* 电流从 0 升到目标值的斜坡时间 */
+#define CMD_ALIGN_HOLD_MS 300U              /* 满电流保持时间 */
+#define CMD_ALIGN_MS     (CMD_ALIGN_RAMP_MS + CMD_ALIGN_HOLD_MS)
+#define CMD_ALIGN_TIMEOUT 1000U             /* 兜底：超过 1 s 强制退出并封锁 */
+#define CMD_ALIGN_ID     2.0f               /* 对齐用 d 轴电流：PI 限在 2 A，既不缺力矩也不过流 */
+#define CMD_TWO_PI       6.28318530718f
+#define CMD_RAD2DEG      57.2957795131f
+#define CMD_POLE_PAIRS   14.0f              /* 与模型/遥测一致 */
+
+static char              s_out[CMD_LINE_MAX];
+static volatile uint8_t  s_out_pending;
+
+/* ---------------- 极简格式化：不拉 stdio，省 4~6 KB ---------------- */
+
+static char *put_str(char *p, const char *s)
+{
+    while (*s != '\0') { *p++ = *s++; }
+    return p;
+}
+
+static char *put_u(char *p, uint32_t v)
+{
+    char    t[11];
+    uint8_t n = 0U;
+
+    if (v == 0U) { *p++ = '0'; return p; }
+    while ((v != 0U) && (n < sizeof(t))) {
+        t[n] = (char)('0' + (v % 10U));
+        v /= 10U;
+        n++;
+    }
+    while (n > 0U) { n--; *p++ = t[n]; }
+    return p;
+}
+
+static char *put_hex2(char *p, uint8_t v)
+{
+    static const char hx[] = "0123456789abcdef";
+    *p++ = hx[(v >> 4) & 0x0FU];
+    *p++ = hx[v & 0x0FU];
+    return p;
+}
+
+/* 两位小数。NaN/Inf 走 "nan" 分支：用取反判断，避免 -ffinite-math-only 把比较优化掉 */
+static char *put_f2(char *p, float v)
+{
+    int32_t  s;
+    uint32_t f;
+
+    if (!(v > -10000.0f) || !(v < 10000.0f)) { return put_str(p, "nan"); }
+    if (v < 0.0f) { *p++ = '-'; v = -v; }
+    s = (int32_t)(v * 100.0f + 0.5f);
+    p = put_u(p, (uint32_t)(s / 100));
+    *p++ = '.';
+    f = (uint32_t)(s % 100);
+    *p++ = (char)('0' + (f / 10U));
+    *p++ = (char)('0' + (f % 10U));
+    return p;
+}
+
+static void emit(char *p)
+{
+    *p++ = '\r';
+    *p++ = '\n';
+    *p   = '\0';
+    s_out_pending = 1U;
+}
+
+/* ---------------- 动作 ---------------- */
+
+static void do_disable(const char *why)
+{
+    /* 顺序：先封 MOE（立即断输出），再清使能，最后占空比回中 */
+    BspServo_PwmEnable(0U);
+    Servo_SetEnable(0U);
+    Servo_SetOpenLoop(0U, 0.0f, 0.0f);      /* 万一在对齐过程中，一并退出 */
+    s_align   = 0U;
+    s_align_t = 0U;
+    BspServo_SetDuty(0.5f, 0.5f, 0.5f);
+    s_armed = 0U;
+    s_deadman = 0U;
+
+    char *p = s_out;
+    p = put_str(p, "[CMD] OFF (");
+    p = put_str(p, why);
+    p = put_str(p, ")  moe=0 en=0");
+    emit(p);
+}
+
+static void do_enable(void)
+{
+    if (s_armed != 0U) {
+        char *p = s_out;
+        p = put_str(p, "[CMD] already ON, deadman reset");
+        emit(p);
+        s_deadman = CMD_DEADMAN_MS;
+        return;
+    }
+    if (BspServo_GetFault() != 0U) {
+        char *p = s_out;
+        p = put_str(p, "[CMD] EN refused: fault=0x");
+        p = put_hex2(p, (uint8_t)(BspServo_GetFault() & 0xFFU));
+        p = put_str(p, " (send X to clear)");
+        emit(p);
+        return;
+    }
+    if (BspServo_IsCurrentCalibrated() == 0U) {
+        /* 联锁：没标定就不许通电，否则电流环把零漂当真实电流去积分 */
+        char *p = s_out;
+        p = put_str(p, "[CMD] EN refused: current not calibrated (send C first)");
+        emit(p);
+        return;
+    }
+
+    /*
+     * 使能前必须把位置给定贴到"当前角度"。
+     * 默认是位置模式，而 Servo_SetPosRef() 一直没有调用者 → s_pos_ref 停在
+     * Servo_Init() 里的 0.0f。如果电机不在 0 位，一使能位置环误差就是
+     * (0 - theta)，乘 50.27 直接顶到 ±120 rad/s，电流给定被限幅到 ±9 A，
+     * 于是 MOE 刚放开就是满力矩 —— 实测 iq_tar=-9.000、电流尖峰 -16.7 A、
+     * 400 us 后过流跳闸，电机根本起不来。
+     */
+    Servo_SetMode(SERVO_MODE_POSITION);
+    Servo_SetPosRef(BspServo_GetThetaCached());
+    Servo_SetEnable(1U);        /* 控制律进入使能态，此刻误差≈0 */
+    BspServo_PwmEnable(1U);     /* 再放开主输出 */
+
+    /* PwmEnable 是 void：故障位非 0 时它会静默拒绝置 MOE，必须回读确认 */
+    if (BspServo_IsPwmEnabled() == 0U) {
+        Servo_SetEnable(0U);
+        s_armed = 0U;
+        char *p = s_out;
+        p = put_str(p, "[CMD] EN failed: MOE stayed 0, fault=0x");
+        p = put_hex2(p, (uint8_t)(BspServo_GetFault() & 0xFFU));
+        p = put_str(p, " (send X)");
+        emit(p);
+        return;
+    }
+
+    s_armed   = 1U;
+    s_deadman = CMD_DEADMAN_MS;
+
+    char *p = s_out;
+    p = put_str(p, "[CMD] ON  moe=1 en=1  deadman=2000ms");
+    emit(p);
+}
+
+static void do_cal(void)
+{
+    if (s_armed != 0U) {
+        char *p = s_out;
+        p = put_str(p, "[CMD] CAL refused: still ON (send D first)");
+        emit(p);
+        return;
+    }
+    if (BspServo_StartCurrentCal() == 0U) {
+        char *p = s_out;
+        p = put_str(p, "[CMD] CAL refused: motor spinning or busy");
+        emit(p);
+        return;
+    }
+    char *p = s_out;
+    p = put_str(p, "[CMD] CAL start (200 ms, keep motor still)");
+    emit(p);
+}
+
+static void do_status(void)
+{
+    float bu = 0.0f, bw = 0.0f, iu = 0.0f, iw = 0.0f;
+    float ou = 0.0f, ow = 0.0f;
+    uint16_t ru = 0U, rw = 0U;
+    char *p = s_out;
+
+    BspServo_GetCurrentBias(&bu, &bw);
+    BspServo_GetCurrents(&iu, &iw);
+    BspServo_GetOvcInfo(&ou, &ow, &ru, &rw);
+
+    p = put_str(p, "[CMD] st en=");
+    p = put_u(p, (uint32_t)(s_armed));
+    p = put_str(p, " moe=");
+    p = put_u(p, (uint32_t)BspServo_IsPwmEnabled());
+    p = put_str(p, " cal=");
+    p = put_u(p, (uint32_t)BspServo_IsCurrentCalibrated());
+    p = put_str(p, " dm=");
+    p = put_u(p, (uint32_t)s_deadman);
+    p = put_str(p, " bias=");
+    p = put_f2(p, bu);
+    p = put_str(p, "/");
+    p = put_f2(p, bw);
+    p = put_str(p, " i=");
+    p = put_f2(p, iu);
+    p = put_str(p, "/");
+    p = put_f2(p, iw);
+    p = put_str(p, " f=0x");
+    p = put_hex2(p, (uint8_t)(BspServo_GetFault() & 0xFFU));
+    /* 过流留证合并进同一行：s_out 只有一个缓冲，连续 emit 会丢掉前一条 */
+    if ((ou != 0.0f) || (ow != 0.0f)) {
+        p = put_str(p, " ovc=");
+        p = put_f2(p, ou);
+        p = put_str(p, "/");
+        p = put_f2(p, ow);
+        p = put_str(p, " raw=");
+        p = put_u(p, (uint32_t)ru);
+        p = put_str(p, "/");
+        p = put_u(p, (uint32_t)rw);
+    }
+    emit(p);
+}
+
+static void do_align(void)
+{
+    if (s_armed != 0U) {
+        char *p = s_out;
+        p = put_str(p, "[CMD] Z refused: still ON (send D first)");
+        emit(p);
+        return;
+    }
+    if (BspServo_IsCurrentCalibrated() == 0U) {
+        char *p = s_out;
+        p = put_str(p, "[CMD] Z refused: current not calibrated (send C first)");
+        emit(p);
+        return;
+    }
+    if (BspServo_GetFault() != 0U) {
+        char *p = s_out;
+        p = put_str(p, "[CMD] Z refused: fault=0x");
+        p = put_hex2(p, (uint8_t)(BspServo_GetFault() & 0xFFU));
+        p = put_str(p, " (send X)");
+        emit(p);
+        return;
+    }
+    if (s_align != 0U) {
+        char *p = s_out;
+        p = put_str(p, "[CMD] Z busy");
+        emit(p);
+        return;
+    }
+
+    /* 给电角度 0 的固定矢量：转子会被吸到该方向，400 ms 后读编码器反算零点 */
+    Servo_SetOpenLoop(1U, 0.0f, 0.0f);      /* 从 0 起，由 align_task1ms 斜坡升流 */
+    BspServo_PwmEnable(1U);
+    if (BspServo_IsPwmEnabled() == 0U) {
+        Servo_SetOpenLoop(0U, 0.0f, 0.0f);
+        char *p = s_out;
+        p = put_str(p, "[CMD] Z failed: MOE stayed 0");
+        emit(p);
+        return;
+    }
+    s_align   = 1U;
+    s_align_t = 0U;
+
+    char *p = s_out;
+    p = put_str(p, "[CMD] ALIGN start: id=2A iq=0 @0deg, hold 400ms");
+    emit(p);
+}
+
+static void align_task1ms(void)
+{
+    if (s_align == 0U) { return; }
+
+    s_align_t++;
+
+    /* 电流斜坡：阶跃给 2 A 会让转子冲过对齐点再被拉回，形成振荡甚至整圈乱转。
+     * 200 ms 从 0 线性升到 CMD_ALIGN_ID，转子平稳跟随。 */
+    if (s_align_t <= CMD_ALIGN_RAMP_MS) {
+        float k = (float)s_align_t / (float)CMD_ALIGN_RAMP_MS;
+        Servo_SetOpenLoop(1U, 0.0f, CMD_ALIGN_ID * k);
+        return;
+    }
+
+    if (s_align_t < CMD_ALIGN_MS) {
+        if (s_align_t > CMD_ALIGN_TIMEOUT) {          /* 兜底，理论上到不了 */
+            BspServo_PwmEnable(0U);
+            Servo_SetOpenLoop(0U, 0.0f, 0.0f);
+            s_align = 0U;
+            s_kill  = 0U;
+            char *p = s_out;
+            p = put_str(p, "[CMD] ALIGN timeout, output blocked");
+            emit(p);
+        }
+        return;
+    }
+
+    /*
+     * 转子已吸合到电角度 0。此时编码器机械角 th 就是"电角度 0 对应的机械位置"。
+     * theta = enc_mech + s_enc_zero，要让 14*theta ≡ 0 (mod 2π)，取 theta=0 即可，
+     * 所以 s_enc_zero = -th（归一化到 [0, 2π)）。
+     * 必须用 GetThetaCached()：GetThetaRad() 会在内部推进测速低通与多圈累积，
+     * 只能在 20 kHz 控制节拍里调用。
+     */
+    float th   = BspServo_GetThetaCached();
+    float zero = -th;
+    while (zero < 0.0f)            { zero += CMD_TWO_PI; }
+    while (zero >= CMD_TWO_PI)     { zero -= CMD_TWO_PI; }
+
+    BspServo_SetEncoderZero(zero);
+    BspServo_PwmEnable(0U);
+    Servo_SetOpenLoop(0U, 0.0f, 0.0f);
+    s_align   = 0U;
+    s_align_t = 0U;
+
+    char *p = s_out;
+    p = put_str(p, "[CMD] ALIGN done th=");
+    p = put_f2(p, th * CMD_RAD2DEG);
+    p = put_str(p, "deg zero=");
+    p = put_f2(p, zero * CMD_RAD2DEG);
+    p = put_str(p, "deg elec=0");
+    emit(p);
+}
+
+static void do_help(void)
+{
+    char *p = s_out;
+    p = put_str(p, "[CMD] keys: C=cal E=on D=off F=+3rpm R=-3rpm P=pos S=status Z=align X=clr ?=help");
+    emit(p);
+}
+
+static void handle(uint8_t c)
+{
+    /* 任何命令都算心跳：重置 deadman，避免操作过程中被超时打断 */
+    if (s_armed != 0U) { s_deadman = CMD_DEADMAN_MS; }
+
+    switch (c) {
+    case 'C': case 'c': do_cal();    break;
+    case 'Z': case 'z': do_align();  break;
+    case 'E': case 'e': do_enable(); break;
+    case 'D': case 'd': do_disable("user"); break;
+    case 'S': case 's': do_status(); break;    case '?':           do_help();   break;
+    case 'X': case 'x':
+        if (BspServo_IsPwmEnabled() != 0U) {
+            char *p = s_out;
+            p = put_str(p, "[CMD] X refused: still ON (send D first)");
+            emit(p);
+        } else {
+            BspServo_ClearFault();
+            BspServo_ClearOvcInfo();     /* 峰值留证也要清，否则下一次看到的还是旧值 */
+            char *p = s_out;
+            p = put_str(p, "[CMD] fault cleared, ovc peak reset");
+            emit(p);
+        }
+        break;
+    case 'F': case 'f':
+        Servo_SetMode(SERVO_MODE_VELOCITY);
+        Servo_SetVelRef(CMD_RPM_TEST * CMD_RAD_PER_RPM);
+        { char *p = s_out; p = put_str(p, "[CMD] VEL +3 rpm (needs E)"); emit(p); }
+        break;
+    case 'R': case 'r':
+        Servo_SetMode(SERVO_MODE_VELOCITY);
+        Servo_SetVelRef(-CMD_RPM_TEST * CMD_RAD_PER_RPM);
+        { char *p = s_out; p = put_str(p, "[CMD] VEL -3 rpm (needs E)"); emit(p); }
+        break;
+    case 'P': case 'p':
+        Servo_SetMode(SERVO_MODE_POSITION);
+        { char *p = s_out; p = put_str(p, "[CMD] POS hold"); emit(p); }
+        break;
+    default:
+        /* 其余字节（含上位机 MAVLink 二进制、回车换行）静默丢弃 */
+        break;
+    }
+}
+
+/* ---------------- 对外接口 ---------------- */
+
+void ServoCmd_Init(void)
+{
+    uint8_t i;
+
+    for (i = 0U; i < CMD_Q_LEN; i++) { s_q[i] = 0U; }
+    s_qh = 0U;
+    s_qt = 0U;
+    s_kill = 0U;
+    s_deadman = 0U;
+    s_armed = 0U;
+    s_out[0] = '\0';
+    s_out_pending = 0U;
+
+    /*
+     * 直接开 RXNE 中断，**不调用 HAL_UART_Receive_IT**：
+     * HAL 的接收会把 huart1.gState 置为 BUSY_RX，而 100 Hz 遥测用同一个 huart1
+     * 做 DMA 发送，两者互相把对方的 gState 检查判死（发送侧会一直 drop）。
+     * 所以接收走裸寄存器，发送继续走 HAL DMA，互不干扰。
+     */
+    __HAL_UART_ENABLE_IT(&huart1, UART_IT_RXNE);
+}
+
+void ServoCmd_Feed(uint8_t b)
+{
+    uint8_t n = (uint8_t)((s_qh + 1U) % CMD_Q_LEN);
+
+    if (n != s_qt) {                 /* 满了就丢新字节，绝不覆盖未处理的 */
+        s_q[s_qh] = b;
+        s_qh = n;
+    }
+}
+
+void ServoCmd_Task1ms(void)
+{
+    align_task1ms();            /* 对齐状态机（只在 Z 期间活动） */
+    if (s_armed == 0U) { return; }
+    if (s_deadman == 0U) { s_kill = 1U; return; }
+    s_deadman--;
+    if (s_deadman == 0U) { s_kill = 1U; }
+}
+
+void ServoCmd_Poll(void)
+{
+    /* 1) 待发行：DMA 忙就下一轮再试，不阻塞主循环 */
+    if ((s_out_pending != 0U) && (UartLink_TrySendAscii(s_out) != 0U)) {
+        s_out_pending = 0U;
+    }
+
+    /* 2) deadman 触发：封锁输出并说明原因 */
+    if (s_kill != 0U) {
+        s_kill = 0U;
+        do_disable("deadman 2s");
+        return;
+    }
+
+    /* 3) 取命令 */
+    while (s_qt != s_qh) {
+        uint8_t c = s_q[s_qt];
+        s_qt = (uint8_t)((s_qt + 1U) % CMD_Q_LEN);
+        handle(c);
+    }
+}
+
+uint8_t ServoCmd_IsArmed(void) { return s_armed; }

@@ -1,0 +1,37 @@
+*** Using Compiler 'V6.24', folder: 'E:\keil5c51\51\ARM\ARMCLANG\Bin'
+Build target 'X72_FOC'
+../Board/can_proto.c(878): error: call to undeclared function 'AppParam_GetStatusWord'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+  878 |     uint32_t st = AppParam_GetStatusWord();
+      |                   ^
+../Board/can_proto.c(905): error: call to undeclared function 'AppParam_GetMit'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+  905 |     AppParam_GetMit(&p0, &v0, &kp0, &kd0, &tau0);   /* kp/kd 用 30066 配的值 */
+      |     ^
+../Board/can_proto.c(907): error: call to undeclared function 'AppParam_GetActiveMode'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+  907 |     switch (AppParam_GetActiveMode()) {
+      |             ^
+../Board/can_proto.c(908): error: use of undeclared identifier 'APP_OP_MODE_MIT'
+  908 |     case APP_OP_MODE_MIT:
+      |          ^
+../Board/can_proto.c(909): error: call to undeclared function 'AppParam_SetMitCmd'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+  909 |         (void)AppParam_SetMitCmd(c->q_des[slot]  * CAN_GEAR_RATIO,
+      |               ^
+../Board/can_proto.c(914): error: use of undeclared identifier 'APP_OP_MODE_POS'
+  914 |     case APP_OP_MODE_POS:
+      |          ^
+../Board/can_proto.c(915): error: call to undeclared function 'AppParam_SetPosP'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+  915 |         (void)AppParam_SetPosP(c->q_des[slot] * CAN_GEAR_RATIO);
+      |               ^
+../Board/can_proto.c(1029): error: call to undeclared function 'AppParam_GetActiveMode'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+ 1029 |         if (AppParam_GetActiveMode() == APP_OP_MODE_MIT) {
+      |             ^
+../Board/can_proto.c(1029): error: use of undeclared identifier 'APP_OP_MODE_MIT'
+ 1029 |         if (AppParam_GetActiveMode() == APP_OP_MODE_MIT) {
+      |                                         ^
+../Board/can_proto.c(1030): error: call to undeclared function 'AppParam_SetMitCmd'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+ 1030 |             (void)AppParam_SetMitCmd(BspServo_GetThetaMulti(), 0.0f,
+      |                   ^
+10 errors generated.
+compiling can_proto.c...
+"X72_FOC\X72_FOC.axf" - 10 Error(s), 0 Warning(s).
+Target not created.
+Build Time Elapsed:  00:00:01

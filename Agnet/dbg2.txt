@@ -1,0 +1,4 @@
+  30056 mode=12 → SUCCESS            回读=12
+find mit T= at 180
+context: '=6/0 mit T=0.00 �=\x00\x00\x10\x01\x01Iu\x00\x00\x00\x00\x00\x00\x00\x00\x00`�>�\x0b�Y>U%�'
+mode: 12 1 0

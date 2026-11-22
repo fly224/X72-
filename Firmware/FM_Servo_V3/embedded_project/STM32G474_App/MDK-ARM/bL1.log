@@ -1,0 +1,13 @@
+*** Using Compiler 'V6.24', folder: 'E:\keil5c51\51\ARM\ARMCLANG\Bin'
+Build target 'X72_FOC'
+compiling main.c...
+../Board/can_proto.c(10): error: 'servo_isr.h' file not found
+   10 | #include "servo_isr.h"
+      |          ^~~~~~~~~~~~~
+1 error generated.
+compiling can_proto.c...
+compiling servo_cmd.c...
+compiling servo_isr.c...
+"X72_FOC\X72_FOC.axf" - 1 Error(s), 0 Warning(s).
+Target not created.
+Build Time Elapsed:  00:00:01

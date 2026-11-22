@@ -1,0 +1,8 @@
+  30056 mode=4  → SUCCESS            回读=4
+  30056 mode=3  → SUCCESS            回读=3
+  30056 mode=1  → SUCCESS            回读=1
+after pos: active=1 en=1 fault=0
+  30056 mode=12 → SUCCESS            回读=12
+cfgack=True mitack=True
+try0 mit='\x00\x00\x00\x00\x00\x00\x00�J���bd�\x00\x04�=���Al��A�!\x11>m��:�\x0c\x13��W�A�z'
+mode: active=12 en=1 fault=0

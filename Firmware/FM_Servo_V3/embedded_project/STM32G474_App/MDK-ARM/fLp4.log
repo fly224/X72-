@@ -1,0 +1,5 @@
+Load "X72_FOC\\X72_FOC.axf" 
+_____^
+*** error 56: cannot open file
+Error: Flash Download failed  -  Could not load file 'X72_FOC\X72_FOC.axf'
+Flash Load finished at 15:50:04

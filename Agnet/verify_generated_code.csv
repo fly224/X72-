@@ -1,0 +1,106 @@
+﻿类别,对象,结果,判定
+工程源文件,startup_stm32g474xx.s,存在,PASS
+工程源文件,../Core/Src/main.c,存在,PASS
+工程源文件,../Core/Src/gpio.c,存在,PASS
+工程源文件,../Core/Src/adc.c,存在,PASS
+工程源文件,../Core/Src/dma.c,存在,PASS
+工程源文件,../Core/Src/fdcan.c,存在,PASS
+工程源文件,../Core/Src/opamp.c,存在,PASS
+工程源文件,../Core/Src/spi.c,存在,PASS
+工程源文件,../Core/Src/tim.c,存在,PASS
+工程源文件,../Core/Src/usart.c,存在,PASS
+工程源文件,../Core/Src/stm32g4xx_it.c,存在,PASS
+工程源文件,../Core/Src/stm32g4xx_hal_msp.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_adc.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_adc_ex.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_ll_adc.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_rcc.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_rcc_ex.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_flash.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_flash_ex.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_flash_ramfunc.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_gpio.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_exti.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_dma.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_dma_ex.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_pwr.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_pwr_ex.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_cortex.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_fdcan.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_opamp.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_opamp_ex.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_spi.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_spi_ex.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_tim.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_tim_ex.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_uart.c,存在,PASS
+工程源文件,../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_uart_ex.c,存在,PASS
+工程源文件,../Core/Src/system_stm32g4xx.c,存在,PASS
+本地 include,Core\Src\adc.c -> adc.h,可解析,PASS
+本地 include,Core\Src\dma.c -> dma.h,可解析,PASS
+本地 include,Core\Src\fdcan.c -> fdcan.h,可解析,PASS
+本地 include,Core\Src\gpio.c -> gpio.h,可解析,PASS
+本地 include,Core\Src\main.c -> main.h,可解析,PASS
+本地 include,Core\Src\main.c -> adc.h,可解析,PASS
+本地 include,Core\Src\main.c -> dma.h,可解析,PASS
+本地 include,Core\Src\main.c -> fdcan.h,可解析,PASS
+本地 include,Core\Src\main.c -> opamp.h,可解析,PASS
+本地 include,Core\Src\main.c -> spi.h,可解析,PASS
+本地 include,Core\Src\main.c -> tim.h,可解析,PASS
+本地 include,Core\Src\main.c -> usart.h,可解析,PASS
+本地 include,Core\Src\main.c -> gpio.h,可解析,PASS
+本地 include,Core\Src\opamp.c -> opamp.h,可解析,PASS
+本地 include,Core\Src\spi.c -> spi.h,可解析,PASS
+本地 include,Core\Src\stm32g4xx_hal_msp.c -> main.h,可解析,PASS
+本地 include,Core\Src\stm32g4xx_it.c -> main.h,可解析,PASS
+本地 include,Core\Src\stm32g4xx_it.c -> stm32g4xx_it.h,可解析,PASS
+本地 include,Core\Src\system_stm32g4xx.c -> stm32g4xx.h,可解析,PASS
+本地 include,Core\Src\tim.c -> tim.h,可解析,PASS
+本地 include,Core\Src\usart.c -> usart.h,可解析,PASS
+本地 include,Core\Inc\adc.h -> main.h,可解析,PASS
+本地 include,Core\Inc\dma.h -> main.h,可解析,PASS
+本地 include,Core\Inc\fdcan.h -> main.h,可解析,PASS
+本地 include,Core\Inc\gpio.h -> main.h,可解析,PASS
+本地 include,Core\Inc\main.h -> stm32g4xx_hal.h,可解析,PASS
+本地 include,Core\Inc\opamp.h -> main.h,可解析,PASS
+本地 include,Core\Inc\spi.h -> main.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_rcc.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_gpio.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_dma.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_cortex.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_adc.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_comp.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_cordic.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_crc.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_cryp.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_dac.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_exti.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_fdcan.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_flash.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_fmac.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_hrtim.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_irda.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_iwdg.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_i2c.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_i2s.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_lptim.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_nand.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_nor.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_opamp.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_pcd.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_pwr.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_qspi.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_rng.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_rtc.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_sai.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_smartcard.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_smbus.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_spi.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_sram.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_tim.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_uart.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_usart.h,可解析,PASS
+本地 include,Core\Inc\stm32g4xx_hal_conf.h -> stm32g4xx_hal_wwdg.h,可解析,PASS
+本地 include,Core\Inc\tim.h -> main.h,可解析,PASS
+本地 include,Core\Inc\usart.h -> main.h,可解析,PASS

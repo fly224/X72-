@@ -1,0 +1,7 @@
+﻿=== @ ===
+[CMD] RL ok R=283.1mohm L=92.34uH Z=0.646ohm iamp=1.549A n=60 |v|=0.568V |i|=2.005A
+
+=== + ===
+[CMD] FI ok pts=6
+[CMD] FI R=322.7mohm L=90.32uH psi=4.372mWb
+[CMD] FI Kt=91.81 Ke=0.0612 dev=3.77%

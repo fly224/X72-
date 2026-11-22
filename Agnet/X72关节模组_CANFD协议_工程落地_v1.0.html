@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X72 关节模组 CAN FD 总线协议 · 工程落地设计 v1.0</title>
+<style>
+:root{
+  --fg:#1a1d21; --muted:#5b6570; --line:#e3e7ec; --bg:#ffffff;
+  --soft:#f7f9fb; --accent:#0b6bcb; --warn:#b45309; --bad:#b42318; --ok:#067647;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:15px/1.72 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;}
+.wrap{max-width:1080px;margin:0 auto;padding:48px 28px 96px}
+header{border-bottom:2px solid var(--fg);padding-bottom:18px;margin-bottom:34px}
+.kicker{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+h1{font-size:30px;line-height:1.3;margin:10px 0 8px;font-weight:700}
+.sub{color:var(--muted);font-size:14px;margin:0}
+.meta{display:flex;flex-wrap:wrap;gap:18px;margin-top:16px;font-size:12.5px;color:var(--muted)}
+.meta b{color:var(--fg);font-weight:600}
+h2{font-size:21px;margin:46px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line);font-weight:700}
+h3{font-size:16.5px;margin:30px 0 10px;font-weight:650}
+h4{font-size:14.5px;margin:20px 0 8px;font-weight:650;color:#2c333a}
+p{margin:10px 0}
+ul,ol{margin:10px 0;padding-left:22px}
+li{margin:5px 0}
+code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace;font-size:12.8px;
+  background:#f1f4f7;padding:1px 5px;border-radius:3px}
+pre{background:var(--soft);border:1px solid var(--line);border-radius:6px;
+  padding:14px 16px;overflow:auto;font-size:12.6px;line-height:1.6}
+pre code{background:none;padding:0}
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.2px}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--soft);font-weight:650;white-space:nowrap}
+tbody tr:nth-child(even){background:#fcfdfe}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.call{border-left:3px solid var(--accent);background:#f4f8fd;padding:12px 16px;margin:16px 0;border-radius:0 5px 5px 0}
+.call.warn{border-color:var(--warn);background:#fdf7ef}
+.call.bad{border-color:var(--bad);background:#fdf3f2}
+.call.ok{border-color:var(--ok);background:#f2faf6}
+.call p:first-child{margin-top:0}.call p:last-child{margin-bottom:0}
+.tag{display:inline-block;font-size:11.5px;padding:1px 7px;border-radius:10px;border:1px solid var(--line);
+  background:#fff;color:var(--muted);margin-right:6px;white-space:nowrap}
+.tag.ok{color:var(--ok);border-color:#b7e4cb;background:#f2faf6}
+.tag.warn{color:var(--warn);border-color:#f0d3a8;background:#fdf7ef}
+.tag.bad{color:var(--bad);border-color:#f3c0bb;background:#fdf3f2}
+.small{font-size:12.6px;color:var(--muted)}
+.mono{font-family:ui-monospace,Consolas,monospace;font-size:12.6px}
+hr{border:0;border-top:1px solid var(--line);margin:34px 0}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">Robot Joint Module · Bus Protocol · Engineering Baseline</div>
+  <h1>X72 关节模组 CAN FD 总线协议<br>工程落地设计</h1>
+  <p class="sub">基于《关节模组 CAN FD 总线协议设计规范 v0.2》，对齐 FM_Servo_V3 固件与 STM32G474 实际约束</p>
+  <div class="meta">
+    <span>版本 <b>v1.0</b></span>
+    <span>日期 <b>2026-11-22</b></span>
+    <span>固件基线 <b>Code=107640</b></span>
+    <span>控制器 <b>STM32G474CEUx / FDCAN1</b></span>
+    <span>适用范围 <b>每臂 ≤5 轴，1 kHz</b></span>
+  </div>
+</header>
+
+<h2>0. 摘要：六个判断</h2>
+
+<div class="call">
+<p><b>判断一：v0.2 的协议骨架可以直接用，但速率组合必须从 2M/5M 降到 1M/5M。</b>
+实际 FDCAN 内核时钟只有 85 MHz 可用（PCLK1 170 MHz ÷ 2），2 Mbit/s 需要 42.5 TQ 或 21.25 TQ，
+都不是整数；1 Mbit/s（17 TQ）与 5 Mbit/s（17 TQ）都能精确生成。这不是偏好，是时钟树的硬约束。</p>
+</div>
+
+<div class="call warn">
+<p><b>判断二：每臂 5 轴是上限，6 轴单总线不可行。</b>
+1M/5M、聚合指令、24 B 反馈下，5 轴占 67.8%（余量 32%）；6 轴要发第二段聚合帧（+16 B），
+占用直接跳到 <b>83.6%</b> —— 远超 v0.2 定的 75% 门限。
+要上 6 轴只有两条路：把标称段改到 2 Mbit/s（需动 PLL），或把反馈压到 16 B（74.4%，临界）。</p>
+</div>
+
+<div class="call bad">
+<p><b>判断三：现有状态字与 CiA 402 不兼容，必须重排。</b>
+固件 <code>AppParam_GetStatusWord()</code> 是 bit0=使能、bit1=故障、bit2=到位、bit[5:3]=模式；
+CiA 402 要求 bit0/1/2=状态机三段、bit3=Fault、bit6=Switch on disabled、bit10=Target reached。
+控制字更只有 bit0（<code>CW_SWITCH_ON</code>），没有 0x06/0x07/0x0F/0x02/0x80 的八态迁移。
+CAN FD 要接标准主站，这部分必须新写，不能靠改宏。</p>
+</div>
+
+<div class="call warn">
+<p><b>判断四：通信看门狗要从 2 s 改成 3 ms / 10 ms 两级。</b>
+现有 <code>CMD_DEADMAN_MS=2000</code> 是为串口调试设的；1 kHz 总线上，2 s 意味着丢 2000 帧才停。
+v0.2 要求"3 周期阻尼、10 周期断使能"，实际需要一条独立的 CAN 看门狗，不能复用 deadman。</p>
+</div>
+
+<div class="call ok">
+<p><b>判断五：从站侧目标整形让"主站给阶跃"变安全，这是本工程相对 v0.2 的增量。</b>
+2026-11-22 已实现 15 rad/s + 180 rad/s² 的 MIT 目标整形（<code>servo_isr.c:596-607</code>），
+3.09 rad 阶跃实测 iq 峰从 4.47 A 降到 1.18 A、无 0x0020。CAN FD 的 CMD_AGG 可以直接给目标，
+不必要求主站做插补 —— 但只对 MIT 模式成立，PP 模式仍由从站梯形规划。</p>
+</div>
+
+<div class="call">
+<p><b>判断六：力矩量级与 v0.2 的假设差两个数量级，帧设计要跟着改。</b>
+本板 Kt=0.091 N·m/A、iq 限幅 5 A，电机侧峰值力矩只有 <b>0.455 N·m</b>；
+配 100:1 减速器后输出侧约 45 N·m。v0.2 按 120 N·m 以上关节讨论 32 B 指令帧，
+本工程用 8 B MIT 帧（kp 量程 0–500）就够，不必上 32 B。</p>
+</div>
+
+<h2>1. 实际约束核对</h2>
+
+<h3>1.1 四个数（按本工程重填）</h3>
+
+<table>
+<thead><tr><th>符号</th><th>含义</th><th>v0.2 取值</th><th>本工程实际</th><th>依据</th></tr></thead>
+<tbody>
+<tr><td>N</td><td>单总线节点数</td><td>5（双臂 5+5）</td><td><b>5</b>（6 轴需拆总线或降反馈）</td><td>§1.3 预算复算</td></tr>
+<tr><td>T</td><td>控制周期</td><td>1 ms</td><td><b>1 ms</b>（同步帧）</td><td>从站外环 2 kHz，1 kHz 指令足够</td></tr>
+<tr><td>B</td><td>单节点每周期载荷</td><td>指令 12 B / 反馈 24 B</td><td><b>12 B / 24 B</b>（同）</td><td>字段可全部填满，见 §4</td></tr>
+<tr><td>L</td><td>总线长度</td><td>≤2 m，支线 ≤5 cm</td><td><b>≤1.5 m</b>（臂内菊花链）</td><td>待结构确认；5 M 数据段支线必须 ≤5 cm</td></tr>
+</tbody>
+</table>
+
+<h3>1.2 FDCAN 时钟：为什么只能 1M/5M</h3>
+
+<p>现状（<code>Core/Src/main.c:160-170</code>、<code>Core/Src/fdcan.c:36-56</code>）：</p>
+
+<pre><code>HSE 8 MHz → PLL M=2, N=85 → VCO 340 MHz
+           → PLLR/2 = 170 MHz (SYSCLK, PCLK1)
+           → PLLQ/2 = 170 MHz
+FDCAN 时钟源 = PCLK1 = 170 MHz，ClockDivider = DIV1
+NominalPrescaler=17, TSeg1=7, TSeg2=2 → 170/17/10 = 1 Mbit/s
+FrameFormat = FDCAN_FRAME_FD_NO_BRS     ← 数据段不加速
+AutoRetransmission = DISABLE            ← 正确，实时总线不该自动重传
+FDCAN1_IT0/IT1 在 MspInit 末尾被 Disable ← 协议层尚未接入
+</code></pre>
+
+<p>两个问题：</p>
+<ol>
+<li><b>内核时钟 170 MHz 超出 G474 数据手册的 80 MHz 上限</b>（FDCAN kernel clock max 80 MHz）。当前靠 17 分频把位时间压到 10 MHz 能跑 1 Mbit/s，但不合规，抖动与温漂没有余量。</li>
+<li><b>要 5 Mbit/s 数据段，位时间时钟至少 40 MHz</b>（8 TQ）。170 MHz 无论怎么分频都出不了整 TQ：<code>170/4=42.5</code>，8.5 TQ 不存在。</li>
+</ol>
+
+<p>可行解是 <code>ClockDivider = DIV2</code> → 85 MHz：</p>
+
+<table>
+<thead><tr><th>参数</th><th>标称段</th><th>数据段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>ker_ck</td><td colspan="2">85 MHz（PCLK1 170 ÷ 2）</td><td>超 80 MHz 标称 6%，见下方风险</td></tr>
+<tr><td>Prescaler</td><td class="n">5</td><td class="n">1</td><td>位时间时钟 17 MHz / 85 MHz</td></tr>
+<tr><td>TQ per bit</td><td class="n">17</td><td class="n">17</td><td>两段同构，便于共用采样点逻辑</td></tr>
+<tr><td>tseg1 / tseg2</td><td class="n">12 / 4</td><td class="n">12 / 4</td><td>—</td></tr>
+<tr><td>采样点</td><td class="n">76.5%</td><td class="n">76.5%</td><td>落在 v0.2 建议的 70–80%</td></tr>
+<tr><td>SJW</td><td class="n">3</td><td class="n">3</td><td>菊花链、连接器多，取大一点</td></tr>
+<tr><td>波特率</td><td class="n">1 Mbit/s</td><td class="n">5 Mbit/s</td><td>—</td></tr>
+</tbody>
+</table>
+
+<div class="call warn">
+<p><b>85 MHz 的合规性</b>：G474 数据手册写 FDCAN kernel clock ≤80 MHz，85 超 6%。
+这在 ST 社区是常见用法（PCLK1=170 + DIV2），实测能跑，但属于"超频"。
+三条路：① 先用 85 MHz 验证功能，量产前评估；② 把 PLLQ 改成 80 MHz，代价是 VCO 从 340 降到 320、
+SYSCLK 从 170 降到 160 MHz，全系统时序与 Flash 等待都要重算；③ 数据段退到 4 Mbit/s（85/1=85 MHz，21.25 TQ 不整，也不行）。
+<b>建议先按 ① 做，把 ② 作为量产前的合规项。</b></p>
+</div>
+
+<h3>1.3 固件现状与缺口</h3>
+
+<table>
+<thead><tr><th>能力</th><th>现状</th><th>CAN FD 需要</th><th>缺口</th></tr></thead>
+<tbody>
+<tr><td>控制模式</td><td>POS(1) / VEL(3) / TORQUE(4) / MIT(12)</td><td>PP / PV / PT / IMP(64)</td><td><span class="tag ok">可直接映射</span>MIT 改报 64</td></tr>
+<tr><td>位置环</td><td>梯形规划 + 纯 P，Kp=100，Amax=30 rad/s²，ErrMax=6 rad</td><td>PP（从站规划）</td><td><span class="tag ok">够用</span></td></tr>
+<tr><td>速度环</td><td>2 kHz，PI + 前馈，iq 限 3 A</td><td>PV</td><td><span class="tag ok">够用</span></td></tr>
+<tr><td>力矩环</td><td>电流环 20 kHz，iq 限 5 A，Kt=0.091</td><td>PT / CST</td><td><span class="tag ok">够用</span>但无力矩传感器闭环</td></tr>
+<tr><td>阻抗</td><td>MIT PD + 目标整形（15 rad/s / 180 rad/s²）</td><td>IMP</td><td><span class="tag ok">可直接用</span></td></tr>
+<tr><td>状态字</td><td>bit0 使能 / bit1 故障 / bit2 到位 / bit[5:3] 模式</td><td>CiA 402 布局</td><td><span class="tag bad">需重排</span></td></tr>
+<tr><td>控制字</td><td>仅 bit0（CW_SWITCH_ON）</td><td>8 态状态机</td><td><span class="tag bad">需新写</span></td></tr>
+<tr><td>故障</td><td>11 位 <code>BSP_FAULT_*</code></td><td>CiA 301 错误码</td><td><span class="tag warn">需映射表</span></td></tr>
+<tr><td>看门狗</td><td>deadman 2000 ms</td><td>3 ms 阻尼 / 10 ms 断使能</td><td><span class="tag bad">需独立 CAN 看门狗</span></td></tr>
+<tr><td>减速比</td><td>无（q 是电机侧）</td><td>输出侧 q_act</td><td><span class="tag warn">需新增 gear_ratio</span></td></tr>
+<tr><td>多圈位置</td><td>RAM 内 <code>theta_multi</code>，掉电丢</td><td>0x2009 掉电保持</td><td><span class="tag warn">需 EEPROM + CRC</span></td></tr>
+<tr><td>参数存储</td><td>Flash 参数页 + 30082 运行参数</td><td>SDO 对象字典</td><td><span class="tag ok">可映射</span></td></tr>
+<tr><td>辨识</td><td>R / L / ψ / 惯量 / 摩擦 / 齿槽表</td><td>SDO 读结果</td><td><span class="tag ok">有数据源</span></td></tr>
+<tr><td>FDCAN 外设</td><td>已生成，BRS 关、中断禁用、无过滤器</td><td>BRS 开、过滤器、协议层</td><td><span class="tag bad">全部待接</span></td></tr>
+</tbody>
+</table>
+
+<h2>2. 与 v0.2 的差异清单</h2>
+
+<table>
+<thead><tr><th>#</th><th>项</th><th>v0.2</th><th>本工程落地</th><th>处置</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>标称/数据速率</td><td>2M / 5M</td><td><b>1M / 5M</b></td><td>改 §3.3 位定时</td></tr>
+<tr><td>2</td><td>每臂节点数</td><td>5</td><td><b>5（6 轴需拆）</b></td><td>沿用，补 6 轴方案</td></tr>
+<tr><td>3</td><td>位置模式语义</td><td>CSP(8)，主站插补</td><td><b>PP(1)，从站梯形规划</b></td><td>改模式号</td></tr>
+<tr><td>4</td><td>MIT 模式号</td><td>厂商段（未指定）</td><td><b>64 (IMP)</b></td><td>显式定义</td></tr>
+<tr><td>5</td><td>MIT 帧长</td><td>8 B（≤40 Nm）/ 16 B / 32 B</td><td><b>12 B 槽（用 CMD_AGG）</b></td><td>见 §4.2</td></tr>
+<tr><td>6</td><td>状态字</td><td>标准 CiA 402</td><td><b>双字：低 16 位 CiA、高 16 位厂商</b></td><td>新增映射</td></tr>
+<tr><td>7</td><td>看门狗</td><td>3 / 10 周期</td><td><b>独立 CAN 看门狗（3/10 ms）</b></td><td>新增，不动 deadman</td></tr>
+<tr><td>8</td><td>q_act 语义</td><td>输出侧（含减速比）</td><td><b>电机侧 ÷ gear_ratio</b></td><td>新增 0x2002</td></tr>
+<tr><td>9</td><td>tau_act</td><td>扭矩传感器优先</td><td><b>iq×Kt 估算，flags.bit3=0</b></td><td>如实标注</td></tr>
+<tr><td>10</td><td>齿隙相关位</td><td>bit5 齿隙补偿 / bit6 死区</td><td><b>改为 bit5 齿槽前馈激活</b></td><td>本工程是谐波 + 齿槽表</td></tr>
+<tr><td>11</td><td>对象字典</td><td>0x2000–0x2300</td><td><b>子集 + 扩充</b></td><td>见 §8</td></tr>
+<tr><td>12</td><td>目标整形</td><td>未提</td><td><b>从站内置，主站可给阶跃</b></td><td>写入 CMD_AGG 说明</td></tr>
+</tbody>
+</table>
+
+<h2>3. 标识符与位定时</h2>
+
+<h3>3.1 11 位 ID 布局（沿用 v0.2）</h3>
+
+<pre><code>bit 10..7  FUNC (4 bit)   功能码，数值越小优先级越高
+bit  6..0  NODE (7 bit)   节点号 1..127，0 = 广播</code></pre>
+
+<table>
+<thead><tr><th>FUNC</th><th>报文</th><th>CAN ID</th><th>方向</th><th>DLC</th><th>周期</th><th>优先级</th></tr></thead>
+<tbody>
+<tr><td>0x0</td><td>EMCY / 安全广播</td><td class="mono">0x000 / 0x000+n</td><td>双向</td><td>16</td><td>事件</td><td>1</td></tr>
+<tr><td>0x1</td><td>SYNC</td><td class="mono">0x080</td><td>主→广播</td><td>16</td><td>1 ms</td><td>2</td></tr>
+<tr><td>0x2</td><td>CMD_AGG（段号）</td><td class="mono">0x100+s</td><td>主→广播</td><td>16–64</td><td>1 ms</td><td>3</td></tr>
+<tr><td>0x3</td><td>CMD_MOTION</td><td class="mono">0x180+n</td><td>主→从</td><td>32</td><td>按需</td><td>4</td></tr>
+<tr><td>0x4</td><td>FB_MOTION</td><td class="mono">0x200+n</td><td>从→主</td><td>24</td><td>1 ms</td><td>5</td></tr>
+<tr><td>0x5</td><td>FB_FAST</td><td class="mono">0x280+n</td><td>从→主</td><td>16</td><td>0.5 ms 可选</td><td>6</td></tr>
+<tr><td>0x6</td><td>FB_DIAG</td><td class="mono">0x300+n</td><td>从→主</td><td>48</td><td>10 ms</td><td>7</td></tr>
+<tr><td>0x7</td><td>HEARTBEAT</td><td class="mono">0x380+n</td><td>从→主</td><td>8</td><td>100 ms</td><td>8</td></tr>
+<tr><td>0x8</td><td>SDO 请求</td><td class="mono">0x400+n</td><td>主→从</td><td>≤64</td><td>事件</td><td>9</td></tr>
+<tr><td>0x9</td><td>SDO 响应</td><td class="mono">0x480+n</td><td>从→主</td><td>≤64</td><td>事件</td><td>10</td></tr>
+<tr><td>0xA</td><td>固件升级</td><td class="mono">0x500+n</td><td>双向</td><td>≤64</td><td>事件</td><td>11</td></tr>
+<tr><td>0xB</td><td>日志</td><td class="mono">0x580+n</td><td>从→主</td><td>≤64</td><td>事件</td><td>12</td></tr>
+</tbody>
+</table>
+
+<h3>3.2 硬件过滤器（每条规则一条）</h3>
+
+<pre><code>F0: ID=0x000, MASK=0x07F   → RX FIFO0   广播：SYNC + CMD_AGG 全部段 + 安全广播
+F1: ID=node,  MASK=0x07F   → RX FIFO1   本节点单播：CMD_MOTION / SDO / 固件
+其余帧硬件丢弃，不进 CPU。</code></pre>
+
+<p class="small">注：EMCY 是节点自己发的，不占收帧过滤器。SYNC 与 CMD_AGG 共用 0x080/0x100 两种 ID，需两条规则或一条 0x080 掩码 0x700 的组过滤。</p>
+
+<h3>3.3 位定时最终值</h3>
+
+<table>
+<thead><tr><th>寄存器项</th><th>值</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>ClockDivider</code></td><td>FDCAN_CLOCK_DIV2</td><td>85 MHz</td></tr>
+<tr><td><code>FrameFormat</code></td><td><b>FDCAN_FRAME_FD_BRS</b></td><td>当前是 NO_BRS，必须改</td></tr>
+<tr><td><code>NominalPrescaler</code></td><td>5</td><td>17 MHz 位时间时钟</td></tr>
+<tr><td><code>NominalTimeSeg1/2</code></td><td>12 / 4</td><td>1 Mbit/s</td></tr>
+<tr><td><code>NominalSyncJumpWidth</code></td><td>3</td><td>—</td></tr>
+<tr><td><code>DataPrescaler</code></td><td>1</td><td>85 MHz</td></tr>
+<tr><td><code>DataTimeSeg1/2</code></td><td>12 / 4</td><td>5 Mbit/s</td></tr>
+<tr><td><code>DataSyncJumpWidth</code></td><td>3</td><td>—</td></tr>
+<tr><td><code>AutoRetransmission</code></td><td>DISABLE</td><td>保持；实时总线宁可丢帧也不阻塞</td></tr>
+<tr><td><code>TxFifoQueueMode</code></td><td>OPERATION</td><td>保持</td></tr>
+</tbody>
+</table>
+
+<h2>4. 报文定义（逐字节，标注数据源）</h2>
+
+<h3>4.1 SYNC — 0x080，16 B，1 ms</h3>
+
+<table>
+<thead><tr><th>偏移</th><th>长度</th><th>字段</th><th>类型</th><th>数据源 / 说明</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>4</td><td>master_t_us</td><td>u32</td><td>主站单调 µs，71.6 min 回绕</td></tr>
+<tr><td>4</td><td>4</td><td>cycle_cnt</td><td>u32</td><td>主站周期计数，从站用于丢帧检测</td></tr>
+<tr><td>8</td><td>2</td><td>period_us</td><td>u16</td><td>1000</td></tr>
+<tr><td>10</td><td>1</td><td>flags</td><td>u8</td><td>bit0 新周期 / bit1 采样沿 / bit2 时间同步使能</td></tr>
+<tr><td>11</td><td>1</td><td>sync_mode</td><td>u8</td><td>0=CAN 时间戳，1=硬线</td></tr>
+<tr><td>12</td><td>4</td><td>reserved</td><td>u32</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3>4.2 CMD_AGG — 0x100+s，16–64 B，1 ms</h3>
+
+<p>每槽 12 B，最多 5 槽（4 + 5×12=64）。<b>本工程的 12 B 槽与 MIT 的三个给定一一对应</b>，
+所以它既是 PP 的位置指令，也是 MIT 的完整指令：</p>
+
+<table>
+<thead><tr><th>偏移</th><th>长度</th><th>字段</th><th>类型</th><th>PP 模式</th><th>MIT 模式</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>2</td><td>cycle_cnt</td><td>u16</td><td colspan="2">主站周期计数低 16 位</td></tr>
+<tr><td>2</td><td>1</td><td>flags</td><td>u8</td><td colspan="2">bit0 请求同步采样 / bit1 广播使能 / bit2 广播快停</td></tr>
+<tr><td>3</td><td>1</td><td>n_slots</td><td>u8</td><td colspan="2">1–5，其余槽忽略</td></tr>
+<tr><td>4+12i</td><td>4</td><td>q_des</td><td>f32</td><td>目标角 rad（<b>输出侧</b>，从站乘 gear_ratio）</td><td>同左</td></tr>
+<tr><td>8+12i</td><td>4</td><td>dq_des</td><td>f32</td><td><b>忽略</b>（从站规划）</td><td>速度给定 rad/s</td></tr>
+<tr><td>12+12i</td><td>4</td><td>tau_ff</td><td>f32</td><td><b>忽略</b></td><td>前馈力矩 Nm（输出侧）</td></tr>
+</tbody>
+</table>
+
+<div class="call ok">
+<p><b>从站侧目标整形（本工程增量）</b>：MIT 模式下 <code>q_des</code> 即使一帧跳 3 rad，
+也会被 15 rad/s / 180 rad/s² 的整形器走成斜坡，不会产生 <code>kp·Δq</code> 的满力矩。
+实测 3.09 rad 阶跃：<code>|iq|</code> 峰 4.47 → 1.18 A，无 0x0020。
+所以主站不必为 MIT 做插补，但 <b>PP 模式必须由主站保证轨迹连续</b>（或让从站做 PP 规划）。</p>
+</div>
+
+<h3>4.3 CMD_MOTION — 0x180+n，32 B，按需</h3>
+
+<table>
+<thead><tr><th>偏移</th><th>长度</th><th>字段</th><th>类型</th><th>映射到现有接口</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>2</td><td>controlword</td><td>u16</td><td>新增 CiA 402 状态机（§5）</td></tr>
+<tr><td>2</td><td>1</td><td>mode</td><td>u8</td><td><code>30056</code> mode：1/3/4/64</td></tr>
+<tr><td>3</td><td>1</td><td>seq</td><td>u8</td><td>新增，回显到 FB_MOTION</td></tr>
+<tr><td>4</td><td>4</td><td>q_des</td><td>f32</td><td><code>30019</code> pos_tar_p / <code>30065</code> p</td></tr>
+<tr><td>8</td><td>4</td><td>dq_des</td><td>f32</td><td><code>30019</code> speed_tar_p / <code>30065</code> v</td></tr>
+<tr><td>12</td><td>4</td><td>tau_ff</td><td>f32</td><td><code>30065</code> tq_set</td></tr>
+<tr><td>16</td><td>4</td><td>kp</td><td>f32</td><td><code>30066</code> kp（内部限 2000）</td></tr>
+<tr><td>20</td><td>4</td><td>kd</td><td>f32</td><td><code>30066</code> kd（内部限 50）</td></tr>
+<tr><td>24</td><td>4</td><td>tau_limit</td><td>f32</td><td>映射 <code>cur_iqmax × Kt</code>；0 = 用默认</td></tr>
+<tr><td>28</td><td>2</td><td>ferr_limit</td><td>u16</td><td>0.1 mrad/LSB；映射 <code>PosLoop_SetErrMax</code>（默认 6 rad）</td></tr>
+<tr><td>30</td><td>2</td><td>cycle_cnt</td><td>u16</td><td>—</td></tr>
+</tbody>
+</table>
+
+<h3>4.4 FB_MOTION — 0x200+n，24 B，1 ms（关键帧）</h3>
+
+<table>
+<thead><tr><th>偏移</th><th>长度</th><th>字段</th><th>类型</th><th>实际取值 / 数据源</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>2</td><td>statusword</td><td>u16</td><td><b>按 CiA 402 重排</b>，见 §5.2</td></tr>
+<tr><td>2</td><td>1</td><td>mode_act</td><td>u8</td><td><code>ServoCmd_ActiveMode()</code>：0/1/3/4 → 报 1/3/4/64</td></tr>
+<tr><td>3</td><td>1</td><td>err_code</td><td>u8</td><td>0 无 / 1–127 故障 / 128–255 警告（§7）</td></tr>
+<tr><td>4</td><td>4</td><td>q_act</td><td>f32</td><td><code>theta_multi ÷ gear_ratio</code>，输出侧 rad，多圈</td></tr>
+<tr><td>8</td><td>4</td><td>dq_act</td><td>f32</td><td><code>omega_mech ÷ gear_ratio</code>，8 拍低通后的值</td></tr>
+<tr><td>12</td><td>4</td><td>tau_act</td><td>f32</td><td><code>iq × Kt × kt_comp × gear_ratio × gear_eff</code>，<b>估算值</b></td></tr>
+<tr><td>16</td><td>2</td><td>temp_motor</td><td>i16</td><td>0.1 °C，NTC 实测</td></tr>
+<tr><td>18</td><td>2</td><td>vbus</td><td>u16</td><td>0.01 V</td></tr>
+<tr><td>20</td><td>1</td><td>seq_echo</td><td>u8</td><td>最近一次 CMD_MOTION 的 seq</td></tr>
+<tr><td>21</td><td>1</td><td>flags</td><td>u8</td><td>见下表</td></tr>
+<tr><td>22</td><td>2</td><td>follow_err</td><td>i16</td><td>0.1 mrad，<code>PosLoop_GetErr()</code></td></tr>
+</tbody>
+</table>
+
+<h4>flags 位（本工程实际可填的只有 3 位）</h4>
+
+<table>
+<thead><tr><th>位</th><th>含义</th><th>本工程</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>抱闸闭合</td><td>无抱闸 → 恒 0</td></tr>
+<tr><td>1</td><td>正限位</td><td>无 → 恒 0</td></tr>
+<tr><td>2</td><td>负限位</td><td>无 → 恒 0</td></tr>
+<tr><td>3</td><td>力矩传感器有效</td><td><b>恒 0</b>，主站不得用 tau_act 做力闭环</td></tr>
+<tr><td>4</td><td>跟随误差超限</td><td><code>PosLoop_GetState()==POS_ST_ERR</code></td></tr>
+<tr><td>5</td><td><s>齿隙补偿激活</s> → <b>齿槽前馈激活</b></td><td><code>CogFf_GetInfo().valid</code></td></tr>
+<tr><td>6</td><td><s>齿隙死区</s> → <b>目标整形中</b></td><td>MIT 下 <code>|p_target − p_shape| &gt; 1 mrad</code></td></tr>
+<tr><td>7</td><td>咬合方向</td><td>无 → 恒 0</td></tr>
+</tbody>
+</table>
+
+<h3>4.5 FB_DIAG — 0x300+n，48 B，10 ms</h3>
+
+<table>
+<thead><tr><th>偏移</th><th>长度</th><th>字段</th><th>本工程数据源</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>2</td><td>proto_ver</td><td>0x0100</td></tr>
+<tr><td>2</td><td>2</td><td>fw_ver</td><td>编译期 <code>FW_VER_MAJOR/MINOR</code></td></tr>
+<tr><td>4</td><td>2</td><td>hw_rev</td><td>硬件版本电阻或宏</td></tr>
+<tr><td>6</td><td>4</td><td>uptime_s</td><td><code>HAL_GetTick()/1000</code></td></tr>
+<tr><td>10</td><td>2</td><td>err_register</td><td>CiA 301 错误寄存器（§7）</td></tr>
+<tr><td>12</td><td>1</td><td>tec</td><td><code>FDCAN1-&gt;ECR</code> TEC</td></tr>
+<tr><td>13</td><td>1</td><td>rec</td><td><code>FDCAN1-&gt;ECR</code> REC</td></tr>
+<tr><td>14</td><td>1</td><td>bus_state</td><td>0 active / 1 passive / 2 bus-off</td></tr>
+<tr><td>15</td><td>1</td><td>load_pct</td><td>需新增：1 ms 任务空转计数</td></tr>
+<tr><td>16</td><td>4</td><td>rx_frames</td><td>新增计数</td></tr>
+<tr><td>20</td><td>4</td><td>tx_frames</td><td>新增计数</td></tr>
+<tr><td>24</td><td>4</td><td>rx_errors</td><td>新增计数</td></tr>
+<tr><td>28</td><td>4</td><td>wdog_trips</td><td>IWDG 复位计数（备份寄存器）</td></tr>
+<tr><td>32</td><td>4</td><td>i_rms</td><td><code>sqrt(id²+iq²)</code> 或三相重构</td></tr>
+<tr><td>36</td><td>4</td><td>tau_ext</td><td><b>无传感器 → 填 NaN（0x7FC00000）</b></td></tr>
+<tr><td>40</td><td>2</td><td>temp_drive</td><td><code>temp_gan</code>，0.1 °C</td></tr>
+<tr><td>42</td><td>2</td><td>temp_sensor</td><td>无 → <b>0x8000 哨兵</b></td></tr>
+<tr><td>44</td><td>2</td><td>jitter_us</td><td>需新增：SYNC 到达间隔与 1 ms 的偏差峰值</td></tr>
+<tr><td>46</td><td>1</td><td>slot_echo</td><td>聚合槽位</td></tr>
+<tr><td>47</td><td>1</td><td>rsv</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h3>4.6 HEARTBEAT / EMCY / SDO</h3>
+
+<p>HEARTBEAT（0x380+n，8 B，100 ms）与 EMCY（0x000+n，16 B）沿用 v0.2 布局，
+字段在本工程都有对应量（NMT 状态、槽位、err_code、vbus、错误码、触发值、快照）。
+SDO 用 <code>cs/index/sub/offset/data[56]</code>，映射见 §8。</p>
+
+<h2>5. CiA 402 状态机落地</h2>
+
+<h3>5.1 现状：只有两态</h3>
+
+<p>固件实际只有 <code>s_armed</code>（0/1）与 <code>ServoCmd_ClearFault()</code>。
+<code>AppParam_SetControlWord()</code> 只看 bit0：置 1 走 <code>arm_with_mode()</code>，置 0 走 <code>disarm</code>。
+没有 Ready / Switched on / Operation enabled 的区分，也没有 Quick stop。</p>
+
+<h3>5.2 状态字重排（关键）</h3>
+
+<table>
+<thead><tr><th>CiA 402 位</th><th>含义</th><th>本工程映射</th></tr></thead>
+<tbody>
+<tr><td>bit0</td><td>Ready to switch on</td><td><code>!fault</code>（自检通过即 1）</td></tr>
+<tr><td>bit1</td><td>Switched on</td><td><code>state &gt;= SWITCHED_ON</code></td></tr>
+<tr><td>bit2</td><td>Operation enabled</td><td><code>s_armed</code>（现有 bit0）</td></tr>
+<tr><td>bit3</td><td>Fault</td><td><code>BspServo_GetFault() != 0</code>（现有 bit1）</td></tr>
+<tr><td>bit4</td><td>Voltage enabled</td><td>母线在窗口内 → 1</td></tr>
+<tr><td>bit5</td><td>Quick stop</td><td><code>state == QUICK_STOP</code></td></tr>
+<tr><td>bit6</td><td>Switch on disabled</td><td><code>state == SWITCH_ON_DISABLED</code></td></tr>
+<tr><td>bit7</td><td>Warning</td><td>温度 &gt;75 °C 或跟随误差 &gt;50% 限值</td></tr>
+<tr><td>bit9</td><td>Remote</td><td>恒 1（总线控制）</td></tr>
+<tr><td>bit10</td><td>Target reached</td><td><code>PosLoop_IsSettled()</code>（现有 bit2）</td></tr>
+<tr><td>bit11</td><td>Internal limit active</td><td>iq 限幅或速度限幅生效</td></tr>
+</tbody>
+</table>
+
+<div class="call warn">
+<p><b>不要直接把旧字塞进 bit0–2。</b>现有 bit0=使能、bit1=故障、bit2=到位，
+与 CiA 402 的 bit0/1/2（三段状态）语义冲突。CAN FD 必须输出<b>重排后的字</b>；
+MAVLink 的 30090 继续用旧位，两套并行，映射函数集中在一处，避免各自演化。</p>
+</div>
+
+<h3>5.3 需要新写的八条迁移</h3>
+
+<pre><code>Switch on disabled --0x06--> Ready to switch on
+Ready to switch on --0x07--> Switched on
+Switched on        --0x0F--> Operation enabled
+Operation enabled  --0x07--> Switched on
+Operation enabled  --0x06--> Ready to switch on
+任意               --0x00--> Switch on disabled
+Operation enabled  --0x02--> Quick stop active
+Fault              --bit7 上升沿--> Switch on disabled</code></pre>
+
+<p><b>Fault reset 必须检测上升沿</b>，不是电平。主站若把 0x0080 常置，从站永远无法复位 ——
+这是 CiA 402 联调最高频的问题，v0.2 已点名，本工程实现时同样要注意。</p>
+
+<h2>6. 模式映射</h2>
+
+<table>
+<thead><tr><th>CiA 402</th><th>编号</th><th>本工程实现</th><th>闭环位置</th><th>周期帧</th></tr></thead>
+<tbody>
+<tr><td>PP 轮廓位置</td><td class="n">1</td><td><code>APP_OP_MODE_POS</code>，从站梯形规划（Amax=30 rad/s²，ErrMax=6 rad）</td><td>从站位置环（纯 P，2 kHz）</td><td>CMD_AGG 的 q_des</td></tr>
+<tr><td>PV 轮廓速度</td><td class="n">3</td><td><code>APP_OP_MODE_VEL</code>，从站斜坡 + PI</td><td>从站速度环（2 kHz）</td><td>CMD_AGG 的 q_des 忽略，用 CMD_MOTION 的 dq_des</td></tr>
+<tr><td>PT 轮廓力矩</td><td class="n">4</td><td><code>APP_OP_MODE_TORQUE</code>，iq 直接给定 + 20 ms 斜坡</td><td>从站电流环（20 kHz）</td><td>CMD_MOTION 的 tau_ff ÷ Kt</td></tr>
+<tr><td>IMP 阻抗</td><td class="n"><b>64</b></td><td><code>APP_OP_MODE_MIT</code>（固件内 12），PD + 目标整形</td><td>从站力矩（PD 直出）</td><td>CMD_AGG 12 B 全用</td></tr>
+<tr><td>CSP 循环同步位置</td><td class="n">8</td><td><b>不实现</b>：位置环在从站，主站插补到 1 kHz 没有意义</td><td>—</td><td>—</td></tr>
+</tbody>
+</table>
+
+<p class="small">为什么不是 CSP：本工程位置环在从站（<code>motion_profile.c</code> + <code>pos_loop.c</code>），
+主站给绝对目标即 PP。若强行标成 CSP，主站会按"每周期插补一点"发，从站再做一次梯形规划，
+两级规划串联会引入额外滞后与过冲。</p>
+
+<h2>7. 故障码映射</h2>
+
+<h3>7.1 固件故障位 → CiA 301</h3>
+
+<table>
+<thead><tr><th>位</th><th>固件宏</th><th>触发条件</th><th>CiA 301 错误码</th><th>err_register</th><th>分级</th></tr></thead>
+<tbody>
+<tr><td>0</td><td><code>BSP_FAULT_OVERCURRENT</code></td><td>相电流超限</td><td class="mono">0x2310</td><td>bit1 电流</td><td>软故障</td></tr>
+<tr><td>1</td><td><code>BSP_FAULT_ENCODER</code></td><td>MT6835 帧错 / 跳变</td><td class="mono">0x7305</td><td>bit7 厂商</td><td>软故障</td></tr>
+<tr><td>2</td><td><code>BSP_FAULT_ADC_SYNC</code></td><td>ADC 注入同步丢失</td><td class="mono">0x5001</td><td>bit7 厂商</td><td>硬故障</td></tr>
+<tr><td>3</td><td><code>BSP_FAULT_BSP_INIT</code></td><td>外设初始化失败</td><td class="mono">0x5002</td><td>bit7 厂商</td><td>硬故障</td></tr>
+<tr><td>4</td><td><code>BSP_FAULT_SPI</code></td><td>编码器 SPI 连续错</td><td class="mono">0x7305</td><td>bit7 厂商</td><td>软故障</td></tr>
+<tr><td>5</td><td><code>BSP_FAULT_OVERSPEED</code></td><td>MIT 1.5·|v_des|+30 / 力矩 300 rpm</td><td class="mono">0x8400</td><td>bit7 厂商</td><td>软故障</td></tr>
+<tr><td>6</td><td><code>BSP_FAULT_OVERVOLT</code></td><td>母线过压</td><td class="mono">0x3210</td><td>bit2 电压</td><td>软故障</td></tr>
+<tr><td>7</td><td><code>BSP_FAULT_UNDERVOLT</code></td><td>母线欠压（使能时判）</td><td class="mono">0x3220</td><td>bit2 电压</td><td>软故障</td></tr>
+<tr><td>8</td><td><code>BSP_FAULT_FOLLOW</code></td><td>位置环跟随误差 &gt; ErrMax 100 ms</td><td class="mono">0x8611</td><td>bit5 行规</td><td>软故障</td></tr>
+<tr><td>9</td><td><code>BSP_FAULT_PHASE_LOSS</code></td><td>某相无电流</td><td class="mono">0x5003</td><td>bit7 厂商</td><td>硬故障</td></tr>
+<tr><td>10</td><td><code>BSP_FAULT_CUR_SENSE</code></td><td>采样零点/两相差过大</td><td class="mono">0x5004</td><td>bit7 厂商</td><td>硬故障</td></tr>
+</tbody>
+</table>
+
+<div class="call bad">
+<p><b>0x8400 不是 CiA 301 标准码</b>（标准里 0x8xxx 是"监控"段，0x8400 未定义）。
+用它是因为速度监控在 CiA 402 里确实没有专用码；厂商段 0x5000–0x5FFF 更规范，
+但 0x8400 在伺服行业有先例。如果对外销售需要过一致性检查，建议改 <code>0x5005 超速</code>。</p>
+</div>
+
+<h3>7.2 复位的实际约束</h3>
+
+<p>固件 <code>ServoCmd_ClearFault()</code> 要求 <code>PwmEnabled()==0</code>（必须先 disarm）。
+映射到 CiA 402 就是：<b>Fault → Switch on disabled 的迁移必须经过 0x00（Disable voltage）或已断使能</b>，
+不能从 Operation enabled 直接发 0x80 复位。主站状态机要按这个约束写。</p>
+
+<h2>8. 参数对象字典映射</h2>
+
+<table>
+<thead><tr><th>索引</th><th>名称</th><th>本工程来源</th><th>读写</th></tr></thead>
+<tbody>
+<tr><td>0x1000</td><td>device_type</td><td>0x00020192</td><td>RO</td></tr>
+<tr><td>0x1001</td><td>error_register</td><td>由故障位合成（§7.1）</td><td>RO</td></tr>
+<tr><td>0x1018</td><td>identity</td><td>vendor=0x5858, product, revision, serial</td><td>RO</td></tr>
+<tr><td>0x6040</td><td>controlword</td><td>新增状态机（§5）</td><td>RW</td></tr>
+<tr><td>0x6041</td><td>statusword</td><td>重排后的字</td><td>RO</td></tr>
+<tr><td>0x6060</td><td>modes_of_operation</td><td><code>AppParam_SetOpMode()</code> 1/3/4/64</td><td>RW</td></tr>
+<tr><td>0x6061</td><td>modes_display</td><td><code>ServoCmd_ActiveMode()</code></td><td>RO</td></tr>
+<tr><td>0x6064</td><td>position_actual</td><td><code>theta_multi</code> × 2²¹ / (2π·gear)</td><td>RO</td></tr>
+<tr><td>0x6077</td><td>torque_actual</td><td><code>iq × Kt</code>，0.1% 额定</td><td>RO</td></tr>
+<tr><td>0x607A</td><td>target_position</td><td><code>30019</code> 的 p</td><td>RW</td></tr>
+<tr><td>0x60FF</td><td>target_velocity</td><td><code>30019</code> 的 w</td><td>RW</td></tr>
+<tr><td>0x60B2</td><td>torque_offset</td><td>MIT 的 tau_ff</td><td>RW</td></tr>
+<tr><td>0x2000</td><td>agg_slot_index</td><td><b>新增</b>，写 Flash</td><td>RW</td></tr>
+<tr><td>0x2001</td><td>joint_serial</td><td>Flash 参数区</td><td>RO</td></tr>
+<tr><td>0x2002</td><td>gear_ratio</td><td><b>新增</b>（固件目前无减速比）</td><td>RW</td></tr>
+<tr><td>0x2003</td><td>rated_torque</td><td><b>新增</b>，用于 0x6077 归一化</td><td>RW</td></tr>
+<tr><td>0x2004</td><td>enc_offset</td><td><code>BspServo_GetEncoderZero()</code></td><td>RO</td></tr>
+<tr><td>0x2005</td><td>enc_side</td><td>恒 0（电机侧单编码器）</td><td>RO</td></tr>
+<tr><td>0x2008</td><td>dir_sign</td><td><code>Servo_GetDirSign()</code></td><td>RW</td></tr>
+<tr><td>0x2009</td><td>multi_turn</td><td><b>新增</b>：<code>s_pos_sum</code> 掉电保持 + CRC</td><td>RW</td></tr>
+<tr><td>0x200A</td><td>kt_est</td><td><code>0.091 × kt_comp</code></td><td>RO</td></tr>
+<tr><td>0x200B</td><td>gear_eff</td><td><b>新增</b>，力矩估算用</td><td>RW</td></tr>
+<tr><td>0x2010</td><td>default kp/kd</td><td>PP：<code>pos_kp=100</code>；IMP：30 / 0.05</td><td>RW</td></tr>
+<tr><td>0x2011</td><td>tau_limit ±</td><td><code>cur_iqmax × Kt</code>（5 A → 0.455 Nm）</td><td>RW</td></tr>
+<tr><td>0x2020</td><td>comm_watchdog_ms</td><td><b>新增 CAN 看门狗</b>，默认 3 ms</td><td>RW</td></tr>
+<tr><td>0x2021</td><td>timeout_action</td><td><b>新增</b>：0 保持 / 1 阻尼 / 2 断使能</td><td>RW</td></tr>
+<tr><td>0x2100</td><td>calib_cmd</td><td><code>30069</code> action 4–14</td><td>WO</td></tr>
+<tr><td>0x2101</td><td>calib_status</td><td><code>30092</code> kind / 进度</td><td>RO</td></tr>
+<tr><td>0x2110</td><td>ident_R / L / psi</td><td><code>30091</code> 或 <code>30082</code> 13</td><td>RO</td></tr>
+<tr><td>0x2111</td><td>ident_J / fric</td><td>机械辨识结果</td><td>RO</td></tr>
+<tr><td>0x2300</td><td>filter_cutoff</td><td>电流环无低通；iq 斜坡 20 ms</td><td>RW</td></tr>
+</tbody>
+</table>
+
+<div class="call warn">
+<p><b>0x2002 gear_ratio 必须新增，否则 q_act 的单位是错的。</b>
+固件 <code>theta_multi</code> 是电机轴多圈角（<code>bsp_servo.c:1001</code>），
+全工程没有减速比参数。v0.2 规定所有位置量都是"输出侧、已折算"，
+不补这一项，主站算出的末端位置会差 N 倍 —— 而且不会报错，只是慢慢偏。</p>
+</div>
+
+<h2>9. 预算与延迟（按 1M/5M 复算）</h2>
+
+<h3>9.1 每帧耗时</h3>
+
+<p>用 v0.2 的模型 <code>T(N) = 30·1.15/R_nom + (8N+34+4·[N&gt;16])/R_data</code>，R_nom=1M、R_data=5M：</p>
+
+<table>
+<thead><tr><th>载荷</th><th>DLC</th><th class="n">标称段</th><th class="n">数据段</th><th class="n">帧总时长</th><th class="n">有效占比</th></tr></thead>
+<tbody>
+<tr><td>8 B</td><td>8</td><td class="n">33 µs</td><td class="n">20 µs</td><td class="n">53 µs</td><td class="n">24%</td></tr>
+<tr><td>16 B</td><td>16</td><td class="n">33 µs</td><td class="n">32 µs</td><td class="n">65 µs</td><td class="n">39%</td></tr>
+<tr><td>24 B</td><td>24</td><td class="n">33 µs</td><td class="n">46 µs</td><td class="n">79 µs</td><td class="n">48%</td></tr>
+<tr><td>32 B</td><td>32</td><td class="n">33 µs</td><td class="n">59 µs</td><td class="n">92 µs</td><td class="n">55%</td></tr>
+<tr><td>48 B</td><td>48</td><td class="n">33 µs</td><td class="n">84 µs</td><td class="n">117 µs</td><td class="n">64%</td></tr>
+<tr><td>64 B</td><td>64</td><td class="n">33 µs</td><td class="n">109 µs</td><td class="n">142 µs</td><td class="n">70%</td></tr>
+</tbody>
+</table>
+
+<h3>9.2 每周期占用</h3>
+
+<table>
+<thead><tr><th>项</th><th>帧数 × 载荷</th><th class="n">耗时</th><th>备注</th></tr></thead>
+<tbody>
+<tr><td>SYNC</td><td>1 × 16 B</td><td class="n">65 µs</td><td>—</td></tr>
+<tr><td>CMD_AGG</td><td>1 × 64 B</td><td class="n">142 µs</td><td>5 轴一帧装完</td></tr>
+<tr><td>FB_MOTION</td><td>5 × 24 B</td><td class="n">395 µs</td><td>—</td></tr>
+<tr><td>FB_DIAG</td><td>0.1 × 48 B</td><td class="n">11.7 µs</td><td>100 Hz 均摊</td></tr>
+<tr><td>HEARTBEAT</td><td>0.05 × 8 B</td><td class="n">2.7 µs</td><td>10 Hz × 5 轴均摊</td></tr>
+<tr><td><b>小计</b></td><td>—</td><td class="n"><b>616 µs</b></td><td>61.6%</td></tr>
+<tr><td>预留 10%</td><td>—</td><td class="n">62 µs</td><td>SDO / 重传 / 错误帧</td></tr>
+<tr><td><b>合计</b></td><td>—</td><td class="n"><b>678 µs</b></td><td><b>67.8%，余量 32%</b></td></tr>
+</tbody>
+</table>
+
+<h4>6 轴会怎样（需要第二段 CMD_AGG，+16 B）</h4>
+
+<table>
+<thead><tr><th>配置</th><th class="n">总占用</th><th class="n">余量</th><th>判定</th></tr></thead>
+<tbody>
+<tr><td>6 轴 × 24 B 反馈，1M/5M</td><td class="n">836 µs</td><td class="n">16.4%</td><td><span class="tag bad">不可行</span></td></tr>
+<tr><td>6 轴 × 16 B 反馈，1M/5M</td><td class="n">744 µs</td><td class="n">25.6%</td><td><span class="tag warn">临界，丢温度/seq/flags</span></td></tr>
+<tr><td>6 轴 × 24 B，2M/5M（需改 PLL）</td><td class="n">686 µs</td><td class="n">31.4%</td><td><span class="tag ok">可行</span></td></tr>
+</tbody>
+</table>
+
+<p class="small">6 轴时 5 个槽装不下，必须发第二段 <code>0x101</code>（DLC=16，1 槽）。这一帧在 1M 下要多付 65 µs，
+正是"5 轴 vs 6 轴"的分水岭：24 B 反馈从 67.8% 直接跳到 83.6%。</p>
+
+<h3>9.3 端到端延迟</h3>
+
+<table>
+<thead><tr><th>环节</th><th class="n">1M/5M</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>主站应用 → 帧排队</td><td class="n">20–100 µs</td><td>RT 内核取小值</td></tr>
+<tr><td>SYNC 传输</td><td class="n">65 µs</td><td>16 B</td></tr>
+<tr><td>CMD_AGG 传输</td><td class="n">142 µs</td><td>64 B</td></tr>
+<tr><td>从站解析 → 电流环生效</td><td class="n">≤100 µs</td><td>电流环 20 kHz</td></tr>
+<tr><td>FB_MOTION 传输</td><td class="n">79 µs</td><td>24 B</td></tr>
+<tr><td>主站解析 → 控制律</td><td class="n">50 µs</td><td>—</td></tr>
+<tr><td><b>合计（不含采样保持）</b></td><td class="n"><b>≈ 0.49 ms</b></td><td>比 2M 方案多 0.07 ms</td></tr>
+</tbody>
+</table>
+
+<p>0.49 ms 环路延迟在 100 Hz 处约 18°、200 Hz 处约 35°。对 PP/PV 足够；
+若将来要做 L3 力控（CST + 扭矩传感器），需要把周期降到 500 µs 或走硬线同步。</p>
+
+<h2>10. 与 MAVLink 双栈共存</h2>
+
+<p>不能把 CAN FD 做成第二套控制逻辑。历史教训：ASCII 与 MAVLink 的 MIT 切环保护曾经不一致，
+排查了两轮才发现是两套代码各自演化。CAN FD 必须复用同一组受控入口：</p>
+
+<pre><code>CAN FD 命令 ──► can_cmd.c ──► AppParam_* / ServoCmd_* ──► Servo_* (ISR)
+MAVLink 命令 ─► mavlink_host.c ─┘                          │
+                                                            ├─ s_src 单一真值
+                                                            ├─ armed / deadman
+                                                            └─ 同一套联锁</code></pre>
+
+<table>
+<thead><tr><th>关注点</th><th>处置</th></tr></thead>
+<tbody>
+<tr><td>模式切换</td><td>两栈共用 <code>AppParam_SetOpMode</code>，不各写一份</td></tr>
+<tr><td>使能/封锁</td><td>共用 <code>ServoCmd_Arm/Disarm</code>，CAN 的 controlword 先翻译成同样调用</td></tr>
+<tr><td>看门狗</td><td>CAN 独立 3/10 ms；MAVLink 保留 2 s deadman；两者都触发 <code>do_disable</code></td></tr>
+<tr><td>故障</td><td>同一个 <code>BspServo_GetFault()</code>，两栈各自编码输出</td></tr>
+<tr><td>参数</td><td>共用 Flash 参数区；30082 与 SDO 指向同一组变量</td></tr>
+<tr><td>优先级</td><td>CAN 为生产通道，MAVLink 为调试通道；同时使能时后到者抢占，需在 <code>ServoCmd</code> 层记来源</td></tr>
+</tbody>
+</table>
+
+<h2>11. 改造清单</h2>
+
+<h3>P0 — 不做就无法通信（约 3 人日）</h3>
+
+<table>
+<thead><tr><th>#</th><th>项</th><th>文件</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>FDCAN 时钟与位定时</td><td><code>fdcan.c:36-56</code></td><td>DIV2、BRS 开、1M/5M、采样点 76.5%</td></tr>
+<tr><td>2</td><td>过滤器</td><td><code>fdcan.c</code></td><td>两条标准 ID 规则，RX FIFO0/1</td></tr>
+<tr><td>3</td><td>中断与收发</td><td><code>fdcan.c</code>、<code>stm32g4xx_it.c</code></td><td>使能 IT0/IT1，RX FIFO 回调，TX 完成计数</td></tr>
+<tr><td>4</td><td>协议层</td><td>新增 <code>can_proto.c/h</code></td><td>解析 SYNC/CMD_AGG/CMD_MOTION，组 FB_MOTION</td></tr>
+<tr><td>5</td><td>命令映射</td><td>新增 <code>can_cmd.c</code></td><td>q/dq/tau → <code>AppParam_*</code>，带单位与 gear 折算</td></tr>
+<tr><td>6</td><td>CAN 看门狗</td><td><code>can_proto.c</code></td><td>3 周期阻尼 / 10 周期断使能</td></tr>
+</tbody>
+</table>
+
+<h3>P1 — 不做就无法接标准主站（约 5 人日）</h3>
+
+<table>
+<thead><tr><th>#</th><th>项</th><th>文件</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>CiA 402 状态机</td><td>新增 <code>cia402.c/h</code></td><td>8 态迁移、Fault reset 上升沿、Quick stop</td></tr>
+<tr><td>8</td><td>状态字重排</td><td><code>app_param.c</code></td><td>新增 <code>AppParam_GetCia402Status()</code>，旧字保留</td></tr>
+<tr><td>9</td><td>故障码映射</td><td>新增 <code>fault_map.c</code></td><td>11 位 → CiA 301 + err_register</td></tr>
+<tr><td>10</td><td>SDO 服务器</td><td>新增 <code>can_sdo.c</code></td><td>cs/index/sub，读写 Flash 与运行参数</td></tr>
+<tr><td>11</td><td>EMCY</td><td><code>can_proto.c</code></td><td>故障上升沿发，同码 100 ms 限速</td></tr>
+<tr><td>12</td><td>心跳</td><td><code>can_proto.c</code></td><td>100 ms，NMT 状态 + 槽位 + vbus</td></tr>
+</tbody>
+</table>
+
+<h3>P2 — 产品化（约 4 人日）</h3>
+
+<table>
+<thead><tr><th>#</th><th>项</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>13</td><td><code>gear_ratio</code> / <code>rated_torque</code></td><td>新增参数并进 Flash blob；FB_MOTION 折算</td></tr>
+<tr><td>14</td><td><code>multi_turn</code> 掉电保持</td><td>断使能/看门狗前写 EEPROM，带魔数 + CRC</td></tr>
+<tr><td>15</td><td>FB_FAST</td><td>0.5 ms 可选通道，默认关</td></tr>
+<tr><td>16</td><td>DBC + cantools 生成</td><td>与固件同仓，加 <code>_Static_assert</code></td></tr>
+<tr><td>17</td><td>bus-off 恢复</td><td>自动恢复后强制 Switch on disabled</td></tr>
+</tbody>
+</table>
+
+<h2>12. 验证计划</h2>
+
+<table>
+<thead><tr><th>#</th><th>测试项</th><th>通过判据</th><th>现有工具</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>单节点回环 + 双节点互通</td><td>无错误帧，TEC/REC=0</td><td>PCAN-USB FD / candleLight</td></tr>
+<tr><td>2</td><td>5 节点 1 kHz 满载 8 h</td><td>错误帧 0，周期抖动 &lt;20 µs</td><td>candump + 统计脚本</td></tr>
+<tr><td>3</td><td>负载注入至 75%</td><td>控制帧时延仍满足 1 ms</td><td>干扰帧发生器</td></tr>
+<tr><td>4</td><td>随机丢帧/重复帧</td><td>3 周期阻尼、10 周期断使能</td><td>可注入错误的脚本</td></tr>
+<tr><td>5</td><td>C_H/C_L 短接、单线断开</td><td>bus-off 可恢复，恢复后不输出力矩</td><td>线束工装</td></tr>
+<tr><td>6</td><td>节点热插拔/掉电</td><td>拓扑不变，其余节点不停</td><td>—</td></tr>
+<tr><td>7</td><td>时间同步精度</td><td>GPIO 翻转 + 示波器 &lt;5 µs</td><td>示波器</td></tr>
+<tr><td>8</td><td>拔通信线</td><td>3 ms 阻尼、10 ms 断使能</td><td>—</td></tr>
+<tr><td>9</td><td>MIT 大阶跃</td><td>3.09 rad 阶跃无 0x0020，iq 峰 &lt;1.5 A</td><td><code>mit_fix_verify.py</code> 可改 CAN 版</td></tr>
+<tr><td>10</td><td>EMC：PWM 满功率</td><td>错误帧 &lt;1 次/小时</td><td>—</td></tr>
+</tbody>
+</table>
+
+<h2>13. 未决项（需要拍板）</h2>
+
+<table>
+<thead><tr><th>#</th><th>问题</th><th>影响</th><th>建议</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>单臂实际轴数：5 还是 6/7</td><td>决定是否需要第二条总线</td><td>若 6 轴，优先做 2M 标称（改 PLLQ）而不是拆总线</td></tr>
+<tr><td>2</td><td>FDCAN 85 MHz 是否可接受</td><td>合规性 vs 改动量</td><td>先验证，量产前评估 PLLQ=80 MHz</td></tr>
+<tr><td>3</td><td>是否对外销售、是否需要 CiA 402 认证</td><td>决定 0x8400 是否要改厂商码</td><td>对外则统一用 0x5xxx 厂商段</td></tr>
+<tr><td>4</td><td>减速比与额定力矩的取值来源</td><td>q_act / tau_act 的换算</td><td>产线写入 0x2002 / 0x2003，随序列号存档</td></tr>
+<tr><td>5</td><td>是否加抱闸</td><td>flags.bit0 与断电策略</td><td>行星模组必须加；谐波可暂不加</td></tr>
+<tr><td>6</td><td>是否有输出侧编码器或扭矩传感器</td><td>决定能否上 L3</td><td>当前单编码器 + 无力矩传感器 → 只能到 L2</td></tr>
+<tr><td>7</td><td>CAN FD 与 MAVLink 的抢占策略</td><td>双栈同时在线时的行为</td><td>建议"最后使能者持有"，并上报来源</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2>附：本工程关键数值速查</h2>
+
+<table>
+<thead><tr><th>项</th><th>值</th><th>来源</th></tr></thead>
+<tbody>
+<tr><td>电流环 / 速度环 / 位置环</td><td>20 kHz / 2 kHz / 2 kHz</td><td><code>servo_isr.c:997</code></td></tr>
+<tr><td>遥测</td><td>100 Hz</td><td><code>telemetry_tx.c</code> TX_DIVIDER</td></tr>
+<tr><td>编码器</td><td>2²¹ counts/rev，21 bit</td><td><code>app_param.h:40</code></td></tr>
+<tr><td>极对数</td><td>14</td><td><code>bsp_servo.h:231</code></td></tr>
+<tr><td>Kt</td><td>0.091 N·m/A（× 温度补偿）</td><td><code>servo_isr.c:378</code></td></tr>
+<tr><td>iq 限幅</td><td>5.0 A（速度环 3.0 A）</td><td><code>servo_isr.c:373</code></td></tr>
+<tr><td>峰值力矩（电机侧）</td><td>0.455 N·m</td><td>5 A × 0.091</td></tr>
+<tr><td>位置环</td><td>Kp=100，Amax=30 rad/s²，ErrMax=6 rad</td><td><code>pos_loop.h</code></td></tr>
+<tr><td>MIT 默认</td><td>kp=30，kd=0.05，EP_MAX=1.0 rad</td><td><code>app_param.c:29</code>、<code>servo_isr.c:553</code></td></tr>
+<tr><td>MIT 整形</td><td>15 rad/s，180 rad/s²，Kp_shape=12</td><td><code>servo_isr.c:596-607</code></td></tr>
+<tr><td>MIT 命令超时 / deadman</td><td>20 ms / 2000 ms</td><td><code>servo_isr.c:559</code>、<code>servo_cmd.c:86</code></td></tr>
+<tr><td>位置门卫 / 速度门卫</td><td>±1256 rad / ±220 rad/s</td><td><code>app_param.c:196</code></td></tr>
+</tbody>
+</table>
+
+<footer>
+X72 关节模组 CAN FD 总线协议 · 工程落地设计 v1.0 · 2026-11-22<br>
+基于《关节模组 CAN FD 总线协议设计规范 v0.2》与 FM_Servo_V3（Code=107640）实际代码核对
+</footer>
+
+</div>
+</body>
+</html>

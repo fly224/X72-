@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双足机器人关节模组 CAN FD 总线协议 · 工程落地设计 v1.1</title>
+<style>
+:root{--fg:#1a1d21;--muted:#5b6570;--line:#e3e7ec;--bg:#fff;--soft:#f7f9fb;--accent:#0b6bcb;--warn:#b45309;--bad:#b42318;--ok:#067647}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.72 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:48px 28px 96px}
+header{border-bottom:2px solid var(--fg);padding-bottom:18px;margin-bottom:34px}
+.kicker{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+h1{font-size:29px;line-height:1.32;margin:10px 0 8px;font-weight:700}
+.sub{color:var(--muted);font-size:14px;margin:0}
+.meta{display:flex;flex-wrap:wrap;gap:18px;margin-top:16px;font-size:12.5px;color:var(--muted)}
+.meta b{color:var(--fg);font-weight:600}
+h2{font-size:21px;margin:46px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line);font-weight:700}
+h3{font-size:16.5px;margin:30px 0 10px;font-weight:650}
+h4{font-size:14.5px;margin:20px 0 8px;font-weight:650;color:#2c333a}
+p{margin:10px 0}ul,ol{margin:10px 0;padding-left:22px}li{margin:5px 0}
+code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace;font-size:12.8px;background:#f1f4f7;padding:1px 5px;border-radius:3px}
+pre{background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:14px 16px;overflow:auto;font-size:12.6px;line-height:1.6}
+pre code{background:none;padding:0}
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.2px}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--soft);font-weight:650;white-space:nowrap}
+tbody tr:nth-child(even){background:#fcfdfe}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.call{border-left:3px solid var(--accent);background:#f4f8fd;padding:12px 16px;margin:16px 0;border-radius:0 5px 5px 0}
+.call.warn{border-color:var(--warn);background:#fdf7ef}
+.call.bad{border-color:var(--bad);background:#fdf3f2}
+.call.ok{border-color:var(--ok);background:#f2faf6}
+.call p:first-child{margin-top:0}.call p:last-child{margin-bottom:0}
+.tag{display:inline-block;font-size:11.5px;padding:1px 7px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--muted);margin-right:6px;white-space:nowrap}
+.tag.ok{color:var(--ok);border-color:#b7e4cb;background:#f2faf6}
+.tag.warn{color:var(--warn);border-color:#f0d3a8;background:#fdf7ef}
+.tag.bad{color:var(--bad);border-color:#f3c0bb;background:#fdf3f2}
+.small{font-size:12.6px;color:var(--muted)}
+.mono{font-family:ui-monospace,Consolas,monospace;font-size:12.6px}
+hr{border:0;border-top:1px solid var(--line);margin:34px 0}
+footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">Biped Robot · Joint Module Bus · Engineering Baseline</div>
+  <h1>双足机器人关节模组 CAN FD 总线协议<br>工程落地设计</h1>
+  <p class="sub">双足 10 关节 = 每腿 5 轴 + 每腿一条 CAN FD；对齐 FM_Servo_V3 固件与 STM32G474 实际约束</p>
+  <div class="meta">
+    <span>版本 <b>v1.1</b></span>
+    <span>日期 <b>2026-11-22</b></span>
+    <span>拓扑 <b>2 × (5 节点 / 1 条总线)</b></span>
+    <span>周期 <b>1 ms</b></span>
+    <span>速率 <b>1 M / 5 M</b></span>
+    <span>固件基线 <b>Code=107640</b></span>
+  </div>
+</header>
+
+<h2>0. 摘要：七个判断</h2>
+
+<div class="call ok">
+<p><b>判断一：每腿一条总线、5 节点、1 kHz 成立，占用 72.5%。</b>
+1M/5M、聚合指令、24 B 反馈、诊断 50 Hz 下：SYNC 65 + CMD_AGG 142 + 5×FB 395 + 诊断 29 + 心跳 3 = 659 µs，
+含 10% 预留 725 µs，余量 27.5%。<b>这正是 v0.2 的 5+5 结论，双足只是把"双臂"换成"双腿"。</b></p>
+</div>
+
+<div class="call warn">
+<p><b>判断二：诊断帧必须从 100 Hz 降到 50 Hz。</b>
+100 Hz 时占用 757 µs（75.7%），刚好越过 75% 门限；50 Hz 降到 72.5%。
+双足诊断（温度、TEC/REC、负载率）不需要 10 ms 刷新，50 Hz 足够。</p>
+</div>
+
+<div class="call bad">
+<p><b>判断三：两路 CAN 的 SYNC 必须同源触发，不能各自跑软件定时器。</b>
+双足行走时左右腿相位差几十微秒，表现为"一条腿总比另一条慢半拍"，落地冲击会一边先着地。
+必须用同一个硬件定时器同时触发两路 FDCAN 发送，且两路共用 <code>cycle_cnt</code>。</p>
+</div>
+
+<div class="call warn">
+<p><b>判断四：速率只能是 1M/5M，2M 需要动 PLL。</b>
+G474 的 FDCAN 时钟源 = PCLK1 = 170 MHz（超 80 MHz 标称），DIV2 后 85 MHz。
+85 MHz 出不了 2 Mbit/s（42.5 / 21.25 TQ 非整数），只能 1M（Prescaler=5，17 TQ）
+与 5M（Prescaler=1，17 TQ），采样点均 76.5%。</p>
+</div>
+
+<div class="call bad">
+<p><b>判断五：现有状态字/控制字与 CiA 402 不兼容，必须新写状态机。</b>
+<code>AppParam_GetStatusWord()</code> 是 bit0 使能 / bit1 故障 / bit2 到位 / bit[5:3] 模式；
+CiA 402 要 bit0-2 三段状态、bit3 Fault、bit6 SOD、bit10 Target reached。
+控制字只有 bit0，没有 0x06/0x07/0x0F/0x02/0x80 八态迁移。</p>
+</div>
+
+<div class="call warn">
+<p><b>判断六：看门狗要从 2 s 改成 3/10 个周期（3 ms / 10 ms）。</b>
+现有 <code>CMD_DEADMAN_MS=2000</code> 是为串口调试设的；1 kHz 下丢 2000 帧才停。
+双足在行走中丢通信，10 ms 内必须进阻尼，否则会摔。</p>
+</div>
+
+<div class="call ok">
+<p><b>判断七：从站目标整形让主站可以给阶跃，但只对阻抗模式成立。</b>
+<code>servo_isr.c:596-607</code> 的 15 rad/s + 180 rad/s² 整形器，实测 3.09 rad 阶跃
+<code>|iq|</code> 峰 4.47→1.18 A、无 0x0020。双足落地时主站给的是"硬目标"，
+这一层整形是防止单腿冲击传成整机振荡的关键。</p>
+</div>
+
+<h2>1. 拓扑与约束</h2>
+
+<h3>1.1 双足拓扑：为什么必须是两条总线</h3>
+
+<pre><code>                    ┌──────────────┐
+                    │   主控 (2×FDCAN) │
+                    └──┬────────┬──┘
+             FDCAN1    │        │    FDCAN2
+          ┌────────────┘        └────────────┐
+          │                                  │
+   左腿 120Ω 端接                        右腿 120Ω 端接
+          │                                  │
+      [髋 Yaw 1]                          [髋 Yaw 6]
+          │                                  │
+      [髋 Roll 2]                         [髋 Roll 7]
+          │                                  │
+      [髋 Pitch 3]                        [髋 Pitch 8]
+          │                                  │
+      [膝 Pitch 4]                        [膝 Pitch 9]
+          │                                  │
+      [踝 Pitch 5]  ── 120Ω               [踝 Pitch 10] ── 120Ω
+          │                                  │
+      [踝 Roll?]                          [踝 Roll?]
+</code></pre>
+
+<p>若 5 轴/腿（髋 3 + 膝 1 + 踝 1），一条总线正好 5 个节点，聚合帧 1 段 64 B 装完。
+若踝是 2 自由度（6 轴/腿），一条总线放不下 1 kHz 全量（82.4%），必须：</p>
+
+<table>
+<thead><tr><th>6 轴/腿的方案</th><th class="n">占用</th><th>代价</th></tr></thead>
+<tbody>
+<tr><td>反馈压到 16 B</td><td class="n">约 73%</td><td>丢温度、seq_echo、flags</td></tr>
+<tr><td>两条总线/腿（髋 3 + 腿 3）</td><td class="n">各约 45%</td><td>主控要 4 路 FDCAN</td></tr>
+<tr><td>标称改 2M（PLL 160 MHz）</td><td class="n">约 66%</td><td>SYSCLK 170→160，全系统时序重算</td></tr>
+<tr><td>周期降到 500 Hz</td><td class="n">约 41%</td><td>行走控制带宽减半</td></tr>
+</tbody>
+</table>
+
+<h3>1.2 四个数</h3>
+
+<table>
+<thead><tr><th>符号</th><th>含义</th><th>本工程</th><th>依据</th></tr></thead>
+<tbody>
+<tr><td>N</td><td>单总线节点数</td><td><b>5</b>（每腿）</td><td>5 轴/腿；6 轴见 1.1</td></tr>
+<tr><td>T</td><td>控制周期</td><td><b>1 ms</b></td><td>双足行走 1 kHz；跑跳另议</td></tr>
+<tr><td>B</td><td>单节点载荷</td><td><b>12 B / 24 B</b></td><td>字段可填满</td></tr>
+<tr><td>L</td><td>总线长度</td><td><b>≈ 0.8–1.2 m</b></td><td>5 关节 × 15–20 cm + 主干</td></tr>
+</tbody>
+</table>
+
+<h3>1.3 FDCAN 时钟：1M/5M 的由来</h3>
+
+<pre><code>HSE 8 MHz → PLL M=2, N=85 → VCO 340 MHz
+           → PLLR/2 = 170 MHz (SYSCLK / PCLK1)
+           → PLLQ/2 = 170 MHz
+FDCAN 时钟源 = PCLK1 = 170 MHz      ← 超 G474 手册 80 MHz 上限
+ClockDivider = DIV2 → 85 MHz        ← 位时间基准
+</code></pre>
+
+<table>
+<thead><tr><th>参数</th><th>标称段</th><th>数据段</th></tr></thead>
+<tbody>
+<tr><td>ker_ck</td><td colspan="2">85 MHz（超 80 MHz 标称 6%）</td></tr>
+<tr><td>Prescaler</td><td class="n">5</td><td class="n">1</td></tr>
+<tr><td>TQ / bit</td><td class="n">17</td><td class="n">17</td></tr>
+<tr><td>tseg1 / tseg2</td><td class="n">12 / 4</td><td class="n">12 / 4</td></tr>
+<tr><td>采样点</td><td class="n">76.5%</td><td class="n">76.5%</td></tr>
+<tr><td>SJW</td><td class="n">3</td><td class="n">3</td></tr>
+<tr><td>速率</td><td class="n">1 Mbit/s</td><td class="n">5 Mbit/s</td></tr>
+</tbody>
+</table>
+
+<div class="call warn">
+<p><b>双足的额外要求</b>：5 个连接器串在 1 m 线束上，5 Mbit/s 数据段的振铃比双臂更严重。
+建议：① 支线 ≤5 cm，H/L 在连接器间直通（掉电不断环）；② 首尾 120 Ω 分裂端接；
+③ 先按 76.5% 采样点验证眼图，节点数固定为 5 后再试 66.7% + SJW 拉满（v0.2 对多节点菊花链的建议）。</p>
+</div>
+
+<h3>1.4 固件现状与缺口</h3>
+
+<table>
+<thead><tr><th>能力</th><th>现状</th><th>缺口</th></tr></thead>
+<tbody>
+<tr><td>模式</td><td>POS(1)/VEL(3)/TORQUE(4)/MIT(12)</td><td><span class="tag ok">映射 PP/PV/PT/IMP(64)</span></td></tr>
+<tr><td>位置环</td><td>梯形规划 + 纯 P，Kp=100，Amax=30 rad/s²，ErrMax=6 rad</td><td><span class="tag ok">够用</span></td></tr>
+<tr><td>速度环</td><td>2 kHz PI + 前馈，iq 限 3 A</td><td><span class="tag ok">够用</span></td></tr>
+<tr><td>电流环</td><td>20 kHz，iq 限 5 A，Kt=0.091</td><td><span class="tag ok">够用</span></td></tr>
+<tr><td>阻抗</td><td>PD + 目标整形（15 rad/s / 180 rad/s²）</td><td><span class="tag ok">可直接用</span></td></tr>
+<tr><td>状态字</td><td>bit0 使能 / bit1 故障 / bit2 到位 / bit[5:3] 模式</td><td><span class="tag bad">需重排</span></td></tr>
+<tr><td>控制字</td><td>仅 bit0</td><td><span class="tag bad">需 8 态状态机</span></td></tr>
+<tr><td>故障</td><td>11 位 <code>BSP_FAULT_*</code></td><td><span class="tag warn">需 CiA 301 映射</span></td></tr>
+<tr><td>看门狗</td><td>deadman 2000 ms</td><td><span class="tag bad">需独立 CAN 看门狗</span></td></tr>
+<tr><td>减速比</td><td>无（q 是电机侧）</td><td><span class="tag warn">需 0x2002</span></td></tr>
+<tr><td>多圈位置</td><td>RAM 内，掉电丢</td><td><span class="tag warn">需 0x2009 掉电保持</span></td></tr>
+<tr><td>FDCAN 外设</td><td>已生成，BRS 关、中断禁用、无过滤器</td><td><span class="tag bad">协议层从零</span></td></tr>
+</tbody>
+</table>
+
+<h2>2. 与 v0.2 的差异</h2>
+
+<table>
+<thead><tr><th>#</th><th>项</th><th>v0.2</th><th>本工程</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>应用</td><td>双臂 10 轴</td><td><b>双足 2×5 轴</b></td></tr>
+<tr><td>2</td><td>速率</td><td>2M/5M</td><td><b>1M/5M</b>（时钟约束）</td></tr>
+<tr><td>3</td><td>诊断帧</td><td>100 Hz</td><td><b>50 Hz</b>（100 Hz 越 75% 门限）</td></tr>
+<tr><td>4</td><td>位置模式</td><td>CSP(8)</td><td><b>PP(1)</b>（从站梯形规划）</td></tr>
+<tr><td>5</td><td>MIT 编号</td><td>厂商段</td><td><b>64 (IMP)</b></td></tr>
+<tr><td>6</td><td>状态字</td><td>CiA 402</td><td>需新写映射（旧字保留给 MAVLink）</td></tr>
+<tr><td>7</td><td>看门狗</td><td>3/10 周期</td><td>独立 CAN 看门狗，3/10 ms</td></tr>
+<tr><td>8</td><td>q_act</td><td>输出侧</td><td>电机侧 ÷ gear_ratio（需新增参数）</td></tr>
+<tr><td>9</td><td>tau_act</td><td>扭矩传感器优先</td><td>iq×Kt 估算，flags.bit3=0</td></tr>
+<tr><td>10</td><td>flags.bit5/6</td><td>齿隙补偿/死区</td><td><b>齿槽前馈激活 / 整形中</b></td></tr>
+<tr><td>11</td><td>力矩量级</td><td>按 120 Nm 讨论 32B</td><td>0.455 Nm（电机侧），12B 槽够</td></tr>
+<tr><td>12</td><td>SYNC</td><td>未强调同源</td><td><b>两路同一硬件定时器触发</b></td></tr>
+</tbody>
+</table>
+
+<h2>3. 标识符与位定时</h2>
+
+<pre><code>bit 10..7  FUNC (4 bit)   功能码，数值越小越优先
+bit  6..0  NODE (7 bit)   节点号 1..127，0 = 广播
+
+左腿：NODE 1..5      右腿：NODE 6..10
+聚合槽位：腿内 0..4（与全局节点号解耦，由 0x2000 配置）</code></pre>
+
+<table>
+<thead><tr><th>FUNC</th><th>报文</th><th>CAN ID</th><th>方向</th><th>DLC</th><th>周期</th></tr></thead>
+<tbody>
+<tr><td>0x0</td><td>EMCY / 安全广播</td><td class="mono">0x000 / 0x000+n</td><td>双向</td><td>16</td><td>事件</td></tr>
+<tr><td>0x1</td><td>SYNC</td><td class="mono">0x080</td><td>主→广播</td><td>16</td><td>1 ms</td></tr>
+<tr><td>0x2</td><td>CMD_AGG</td><td class="mono">0x100</td><td>主→广播</td><td>64</td><td>1 ms</td></tr>
+<tr><td>0x3</td><td>CMD_MOTION</td><td class="mono">0x180+n</td><td>主→从</td><td>32</td><td>按需</td></tr>
+<tr><td>0x4</td><td>FB_MOTION</td><td class="mono">0x200+n</td><td>从→主</td><td>24</td><td>1 ms</td></tr>
+<tr><td>0x5</td><td>FB_FAST</td><td class="mono">0x280+n</td><td>从→主</td><td>16</td><td>可选</td></tr>
+<tr><td>0x6</td><td>FB_DIAG</td><td class="mono">0x300+n</td><td>从→主</td><td>48</td><td><b>20 ms</b></td></tr>
+<tr><td>0x7</td><td>HEARTBEAT</td><td class="mono">0x380+n</td><td>从→主</td><td>8</td><td>100 ms</td></tr>
+<tr><td>0x8/0x9</td><td>SDO 请求/响应</td><td class="mono">0x400+n / 0x480+n</td><td>双向</td><td>≤64</td><td>事件</td></tr>
+</tbody>
+</table>
+
+<p class="small">5 轴一帧 64 B 装完（4 + 5×12），不需要第二段。这也是"每腿 5 轴"在协议上的甜点：
+槽位数与关节数刚好相等，不多不少。</p>
+
+<h2>4. 报文定义（要点）</h2>
+
+<h3>4.1 CMD_AGG — 0x100，64 B，1 ms</h3>
+
+<table>
+<thead><tr><th>偏移</th><th>长度</th><th>字段</th><th>类型</th><th>PP 模式</th><th>MIT 模式</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>2</td><td>cycle_cnt</td><td>u16</td><td colspan="2">主站周期计数低 16 位</td></tr>
+<tr><td>2</td><td>1</td><td>flags</td><td>u8</td><td colspan="2">bit0 同步采样 / bit1 广播使能 / bit2 <b>快停</b></td></tr>
+<tr><td>3</td><td>1</td><td>n_slots</td><td>u8</td><td colspan="2">1–5</td></tr>
+<tr><td>4+12i</td><td>4</td><td>q_des</td><td>f32</td><td>目标角 rad（输出侧）</td><td>目标角 rad</td></tr>
+<tr><td>8+12i</td><td>4</td><td>dq_des</td><td>f32</td><td>忽略</td><td>速度给定</td></tr>
+<tr><td>12+12i</td><td>4</td><td>tau_ff</td><td>f32</td><td>忽略</td><td>前馈力矩</td></tr>
+</tbody>
+</table>
+
+<div class="call ok">
+<p><b>双足落地场景</b>：主站检测到触地瞬间，可以在同一帧里把 <code>q_des</code> 拉回当前角、
+<code>kp</code> 降到软值（通过 CMD_MOTION），由从站整形器在 15 rad/s 内完成过渡。
+若直接跳变，<code>kp·Δq</code> 会让单腿产生 0.45 Nm 的冲击，经躯干耦合放大成整机振荡。</p>
+</div>
+
+<h3>4.2 FB_MOTION — 0x200+n，24 B，1 ms</h3>
+
+<table>
+<thead><tr><th>偏移</th><th>长度</th><th>字段</th><th>本工程取值</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>2</td><td>statusword</td><td>CiA 402 重排（§5.2）</td></tr>
+<tr><td>2</td><td>1</td><td>mode_act</td><td>1/3/4/64</td></tr>
+<tr><td>3</td><td>1</td><td>err_code</td><td>0 / 1–127 故障 / 128–255 警告</td></tr>
+<tr><td>4</td><td>4</td><td>q_act</td><td><code>theta_multi ÷ gear_ratio</code>，输出侧多圈 rad</td></tr>
+<tr><td>8</td><td>4</td><td>dq_act</td><td><code>omega_mech ÷ gear_ratio</code></td></tr>
+<tr><td>12</td><td>4</td><td>tau_act</td><td><code>iq × Kt × kt_comp × gear × eff</code>，估算</td></tr>
+<tr><td>16</td><td>2</td><td>temp_motor</td><td>0.1 °C</td></tr>
+<tr><td>18</td><td>2</td><td>vbus</td><td>0.01 V</td></tr>
+<tr><td>20</td><td>1</td><td>seq_echo</td><td>最近 CMD_MOTION 的 seq</td></tr>
+<tr><td>21</td><td>1</td><td>flags</td><td>bit3=0（无力矩传感器）、bit4 跟随超限、bit5 齿槽前馈、bit6 整形中</td></tr>
+<tr><td>22</td><td>2</td><td>follow_err</td><td>0.1 mrad</td></tr>
+</tbody>
+</table>
+
+<h3>4.3 其余帧</h3>
+
+<p>SYNC（16 B）、CMD_MOTION（32 B）、FB_DIAG（48 B）、HEARTBEAT（8 B）、EMCY（16 B）、SDO（≤64 B）
+沿用 v0.2 布局；字段与固件变量的对应关系见 v1.0 文档 §4，本次只改周期与节点数。</p>
+
+<h2>5. CiA 402 状态机落地</h2>
+
+<h3>5.1 状态字重排（不可省略）</h3>
+
+<table>
+<thead><tr><th>CiA 402 位</th><th>含义</th><th>映射</th></tr></thead>
+<tbody>
+<tr><td>bit0</td><td>Ready to switch on</td><td><code>!fault</code></td></tr>
+<tr><td>bit1</td><td>Switched on</td><td><code>state ≥ SWITCHED_ON</code></td></tr>
+<tr><td>bit2</td><td>Operation enabled</td><td><code>s_armed</code>（旧 bit0）</td></tr>
+<tr><td>bit3</td><td>Fault</td><td><code>BspServo_GetFault()</code>（旧 bit1）</td></tr>
+<tr><td>bit4</td><td>Voltage enabled</td><td>母线在窗口内</td></tr>
+<tr><td>bit5</td><td>Quick stop</td><td><code>state == QUICK_STOP</code></td></tr>
+<tr><td>bit6</td><td>Switch on disabled</td><td><code>state == SOD</code></td></tr>
+<tr><td>bit7</td><td>Warning</td><td>温度 &gt;75 °C 或跟随误差 &gt;50%</td></tr>
+<tr><td>bit9</td><td>Remote</td><td>恒 1</td></tr>
+<tr><td>bit10</td><td>Target reached</td><td><code>PosLoop_IsSettled()</code>（旧 bit2）</td></tr>
+<tr><td>bit11</td><td>Internal limit</td><td>iq / 速度限幅生效</td></tr>
+</tbody>
+</table>
+
+<h3>5.2 八条迁移</h3>
+
+<pre><code>SOD --0x06--&gt; Ready to switch on
+Ready --0x07--&gt; Switched on
+Switched on --0x0F--&gt; Operation enabled
+Op enabled --0x07--&gt; Switched on
+Op enabled --0x06--&gt; Ready
+任意 --0x00--&gt; SOD
+Op enabled --0x02--&gt; Quick stop
+Fault --bit7 上升沿--&gt; SOD</code></pre>
+
+<p><b>双足特例</b>：摔倒是"安全级"事件，不能只靠 EMCY。必须硬件急停 + 双路 STO；
+CAN 上的 <code>flags.bit2</code>（快停广播）只做"软停机"，用于姿态切换失败后的收腿，
+不计入安全功能。</p>
+
+<h2>6. 模式映射</h2>
+
+<table>
+<thead><tr><th>CiA 402</th><th>编号</th><th>固件</th><th>双足用途</th></tr></thead>
+<tbody>
+<tr><td>PP</td><td class="n">1</td><td><code>APP_OP_MODE_POS</code>（从站梯形规划）</td><td>站立保持、单腿标定</td></tr>
+<tr><td>PV</td><td class="n">3</td><td><code>APP_OP_MODE_VEL</code></td><td>关节限速、收腿</td></tr>
+<tr><td>PT</td><td class="n">4</td><td><code>APP_OP_MODE_TORQUE</code></td><td>重力补偿前馈、落地缓冲</td></tr>
+<tr><td>IMP</td><td class="n"><b>64</b></td><td><code>APP_OP_MODE_MIT</code>（固件内 12）</td><td><b>行走主力</b>：PD + 目标整形</td></tr>
+<tr><td>CSP</td><td class="n">8</td><td>不实现</td><td>位置环在从站，主站插补无意义</td></tr>
+</tbody>
+</table>
+
+<p class="small">双足行走通常用 IMP：主站给摆动腿的期望轨迹 + 支撑腿的刚度/阻尼，
+从站 20 kHz 执行 PD，主站 1 kHz 更新目标。这也是 v0.2 的 L2 级别，不需要扭矩传感器。</p>
+
+<h2>7. 故障码映射</h2>
+
+<table>
+<thead><tr><th>位</th><th>固件</th><th>CiA 301</th><th>双足处置</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>OVERCURRENT</td><td class="mono">0x2310</td><td>软故障，退阻尼</td></tr>
+<tr><td>1</td><td>ENCODER</td><td class="mono">0x7305</td><td><b>硬故障</b>：腿失去位置，必须收腿</td></tr>
+<tr><td>2</td><td>ADC_SYNC</td><td class="mono">0x5001</td><td>硬故障</td></tr>
+<tr><td>3</td><td>BSP_INIT</td><td class="mono">0x5002</td><td>硬故障</td></tr>
+<tr><td>4</td><td>SPI</td><td class="mono">0x7305</td><td>软故障（连续错升级）</td></tr>
+<tr><td>5</td><td>OVERSPEED</td><td class="mono">0x8400</td><td>软故障，退阻尼</td></tr>
+<tr><td>6</td><td>OVERVOLT</td><td class="mono">0x3210</td><td>落地回馈泵升，先泄放</td></tr>
+<tr><td>7</td><td>UNDERVOLT</td><td class="mono">0x3220</td><td>电池低电量，降额</td></tr>
+<tr><td>8</td><td>FOLLOW</td><td class="mono">0x8611</td><td>堵转/踩空，退阻尼</td></tr>
+<tr><td>9</td><td>PHASE_LOSS</td><td class="mono">0x5003</td><td>硬故障</td></tr>
+<tr><td>10</td><td>CUR_SENSE</td><td class="mono">0x5004</td><td>硬故障</td></tr>
+</tbody>
+</table>
+
+<p class="small">双足的 EMCY 要限速（同码 ≤1 帧/100 ms），否则一条腿连续报过流会把
+最高优先级占满，另一条腿的控制帧被饿死 —— 这是"单腿故障拖垮整机"的典型路径。</p>
+
+<h2>8. 预算（核心）</h2>
+
+<h3>8.1 每帧耗时（1M/5M）</h3>
+
+<table>
+<thead><tr><th>载荷</th><th class="n">标称段</th><th class="n">数据段</th><th class="n">帧总时长</th></tr></thead>
+<tbody>
+<tr><td>8 B</td><td class="n">33 µs</td><td class="n">20 µs</td><td class="n">53 µs</td></tr>
+<tr><td>16 B</td><td class="n">33 µs</td><td class="n">32 µs</td><td class="n">65 µs</td></tr>
+<tr><td>24 B</td><td class="n">33 µs</td><td class="n">46 µs</td><td class="n">79 µs</td></tr>
+<tr><td>32 B</td><td class="n">33 µs</td><td class="n">59 µs</td><td class="n">92 µs</td></tr>
+<tr><td>48 B</td><td class="n">33 µs</td><td class="n">84 µs</td><td class="n">117 µs</td></tr>
+<tr><td>64 B</td><td class="n">33 µs</td><td class="n">109 µs</td><td class="n">142 µs</td></tr>
+</tbody>
+</table>
+
+<h3>8.2 每腿每周期（5 轴，1 ms）</h3>
+
+<table>
+<thead><tr><th>项</th><th>帧数 × 载荷</th><th class="n">耗时</th><th>备注</th></tr></thead>
+<tbody>
+<tr><td>SYNC</td><td>1 × 16 B</td><td class="n">65 µs</td><td>1 ms</td></tr>
+<tr><td>CMD_AGG</td><td>1 × 64 B</td><td class="n">142 µs</td><td>5 槽装满</td></tr>
+<tr><td>FB_MOTION</td><td>5 × 24 B</td><td class="n">395 µs</td><td>每轴 1 ms</td></tr>
+<tr><td>FB_DIAG</td><td>5 × 48 B @50 Hz</td><td class="n">29 µs</td><td>20 ms 一次</td></tr>
+<tr><td>HEARTBEAT</td><td>5 × 8 B @10 Hz</td><td class="n">3 µs</td><td>100 ms 一次</td></tr>
+<tr><td><b>小计</b></td><td>—</td><td class="n"><b>659 µs</b></td><td>65.9%</td></tr>
+<tr><td>预留 10%</td><td>—</td><td class="n">66 µs</td><td>SDO / 重传 / 错误帧</td></tr>
+<tr><td><b>合计</b></td><td>—</td><td class="n"><b>725 µs</b></td><td><b>72.5%，余量 27.5%</b></td></tr>
+</tbody>
+</table>
+
+<p class="small">修正：v1.0 文档写的是 678 µs（67.8%），当时诊断帧只算了 1 帧。
+实际 5 轴每 20 ms 各发一帧，均摊 29 µs 而不是 11.7 µs，正确值是 725 µs。v1.1 以此为准。</p>
+
+<h4>对照：把诊断改回 100 Hz</h4>
+
+<table>
+<thead><tr><th>配置</th><th class="n">合计</th><th class="n">余量</th><th>判定</th></tr></thead>
+<tbody>
+<tr><td>5 轴，诊断 100 Hz</td><td class="n">757 µs</td><td class="n">24.3%</td><td><span class="tag warn">75.7%，越过门限</span></td></tr>
+<tr><td>5 轴，诊断 50 Hz</td><td class="n">725 µs</td><td class="n">27.5%</td><td><span class="tag ok">推荐</span></td></tr>
+<tr><td>6 轴，诊断 50 Hz（第二段 AGG）</td><td class="n">824 µs</td><td class="n">17.6%</td><td><span class="tag bad">82.4%</span></td></tr>
+</tbody>
+</table>
+
+<h3>8.3 端到端延迟</h3>
+
+<table>
+<thead><tr><th>环节</th><th class="n">1M/5M</th></tr></thead>
+<tbody>
+<tr><td>主站应用 → 帧排队</td><td class="n">20–100 µs</td></tr>
+<tr><td>SYNC 传输（16 B）</td><td class="n">65 µs</td></tr>
+<tr><td>CMD_AGG 传输（64 B）</td><td class="n">142 µs</td></tr>
+<tr><td>从站解析 → 电流环生效</td><td class="n">≤100 µs</td></tr>
+<tr><td>FB_MOTION 传输（24 B）</td><td class="n">79 µs</td></tr>
+<tr><td>主站解析 → 控制律</td><td class="n">50 µs</td></tr>
+<tr><td><b>合计（不含采样保持）</b></td><td class="n"><b>≈ 0.49 ms</b></td></tr>
+</tbody>
+</table>
+
+<p>0.49 ms 在 100 Hz 处约 18°、200 Hz 处约 35°。双足行走的摆动相频率通常 1–3 Hz，
+支撑相冲击的力控带宽要求约 50–100 Hz，这个延迟够用；跑跳需要把周期降到 500 µs。</p>
+
+<h3>8.4 附录：若整机 10 轴真串一条线</h3>
+
+<table>
+<thead><tr><th>周期</th><th>配置</th><th class="n">占用</th><th>判定</th></tr></thead>
+<tbody>
+<tr><td>1 kHz</td><td>10 × 24 B，2 段 AGG</td><td class="n">1253 µs → 含预留 1378</td><td><span class="tag bad">125%，不可能</span></td></tr>
+<tr><td>1 kHz</td><td>10 × 16 B</td><td class="n">1117 µs → 1229</td><td><span class="tag bad">仍不可能</span></td></tr>
+<tr><td><b>500 Hz</b></td><td>10 × 24 B，2 段 AGG</td><td class="n">626 µs → 689</td><td><span class="tag ok">68.9%，可行</span></td></tr>
+<tr><td>500 Hz</td><td>10 × 16 B</td><td class="n">558 µs → 614</td><td><span class="tag ok">61.4%</span></td></tr>
+</tbody>
+</table>
+
+<p class="small">结论：10 轴单线只能 500 Hz。双足的左右腿本来就是两个独立机械链，
+拆成两条总线不是为了省带宽，而是为了让每条腿保住 1 kHz 并隔离单腿故障。</p>
+
+<h2>9. 双足特有要求</h2>
+
+<table>
+<thead><tr><th>需求</th><th>协议影响</th><th>实现</th></tr></thead>
+<tbody>
+<tr><td>左右腿相位同步</td><td>两路 SYNC 同源</td><td>同一 TIM 比较事件触发两路 FDCAN TX；共用 <code>cycle_cnt</code></td></tr>
+<tr><td>足端触地检测</td><td>关节采样与 IMU/FSR 对齐</td><td>SYNC 的 <code>flags.bit1</code> 作采样沿，从站在该沿锁存 q/dq</td></tr>
+<tr><td>落地冲击</td><td>力矩限幅 + 快速退让</td><td>从站 iq 限 5 A（0.455 Nm）；MIT <code>tau_limit</code> 可逐帧下调</td></tr>
+<tr><td>跑跳（&gt;1 kHz）</td><td>周期减半或 FB_FAST</td><td>500 µs 周期需重算预算；FB_FAST 只在单腿调试时开</td></tr>
+<tr><td>电池供电</td><td>母线宽范围</td><td><code>vbus</code> 100 Hz 上报；欠压阈值随 SOC 分档</td></tr>
+<tr><td>摔倒保护</td><td>安全级停机</td><td>硬件急停 + STO；CAN 快停只做软收腿</td></tr>
+<tr><td>单腿故障隔离</td><td>不拖垮另一条腿</td><td>两路独立总线；EMCY 限速；故障腿进阻尼，好腿继续支撑</td></tr>
+</tbody>
+</table>
+
+<h2>10. 与 MAVLink 双栈共存</h2>
+
+<pre><code>CAN FD 命令 ──► can_cmd.c ──► AppParam_* / ServoCmd_* ──► Servo_* (ISR)
+MAVLink 命令 ─► mavlink_host.c ─┘
+                                    ├─ s_src 单一真值
+                                    ├─ armed / deadman
+                                    └─ 同一套联锁</code></pre>
+
+<table>
+<thead><tr><th>关注点</th><th>处置</th></tr></thead>
+<tbody>
+<tr><td>模式切换</td><td>共用 <code>AppParam_SetOpMode</code></td></tr>
+<tr><td>使能/封锁</td><td>共用 <code>ServoCmd_Arm/Disarm</code></td></tr>
+<tr><td>看门狗</td><td>CAN 3/10 ms；MAVLink 2 s；都落 <code>do_disable</code></td></tr>
+<tr><td>故障</td><td>同一个 <code>BspServo_GetFault()</code></td></tr>
+<tr><td>参数</td><td>共用 Flash 参数区</td></tr>
+<tr><td>优先级</td><td>CAN 生产、MAVLink 调试；同时在线时"最后使能者持有"并记来源</td></tr>
+</tbody>
+</table>
+
+<h2>11. 改造清单</h2>
+
+<h3>P0 — 通信打通（3 人日）</h3>
+
+<table>
+<thead><tr><th>#</th><th>项</th><th>文件</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>位定时</td><td><code>fdcan.c:36-56</code></td><td>DIV2、BRS 开、1M/5M、76.5%</td></tr>
+<tr><td>2</td><td>过滤器</td><td><code>fdcan.c</code></td><td>广播 + 本节点两条规则</td></tr>
+<tr><td>3</td><td>中断收发</td><td><code>fdcan.c</code>、<code>stm32g4xx_it.c</code></td><td>IT0/IT1 使能、RX FIFO 回调</td></tr>
+<tr><td>4</td><td>协议层</td><td>新增 <code>can_proto.c/h</code></td><td>SYNC/CMD_AGG/CMD_MOTION 解析，FB 组帧</td></tr>
+<tr><td>5</td><td>命令映射</td><td>新增 <code>can_cmd.c</code></td><td>q/dq/tau → <code>AppParam_*</code></td></tr>
+<tr><td>6</td><td>CAN 看门狗</td><td><code>can_proto.c</code></td><td>3 周期阻尼 / 10 周期断使能</td></tr>
+</tbody>
+</table>
+
+<h3>P1 — 接标准主站（5 人日）</h3>
+
+<table>
+<thead><tr><th>#</th><th>项</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>7</td><td>CiA 402 状态机</td><td>八态迁移、Fault reset 上升沿、Quick stop</td></tr>
+<tr><td>8</td><td>状态字重排</td><td><code>AppParam_GetCia402Status()</code>，旧字保留</td></tr>
+<tr><td>9</td><td>故障码映射</td><td>11 位 → CiA 301 + err_register</td></tr>
+<tr><td>10</td><td>SDO 服务器</td><td>cs/index/sub，读写 Flash 与运行参数</td></tr>
+<tr><td>11</td><td>EMCY</td><td>上升沿发，同码 100 ms 限速</td></tr>
+<tr><td>12</td><td>心跳</td><td>100 ms，NMT + 槽位 + vbus</td></tr>
+</tbody>
+</table>
+
+<h3>P2 — 产品化（4 人日）</h3>
+
+<table>
+<thead><tr><th>#</th><th>项</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>13</td><td>gear_ratio / rated_torque</td><td>新增参数进 Flash，FB 折算</td></tr>
+<tr><td>14</td><td>multi_turn 掉电保持</td><td>断使能前写 EEPROM，魔数 + CRC</td></tr>
+<tr><td>15</td><td>DBC + cantools</td><td>同仓管理，<code>_Static_assert</code></td></tr>
+<tr><td>16</td><td>bus-off 恢复</td><td>恢复后强制 SOD</td></tr>
+<tr><td>17</td><td>两路 SYNC 同源</td><td>主控侧实现，不是从站</td></tr>
+</tbody>
+</table>
+
+<h2>12. 验证计划</h2>
+
+<table>
+<thead><tr><th>#</th><th>测试项</th><th>通过判据</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>单腿 5 节点 1 kHz 满载 8 h</td><td>错误帧 0，抖动 &lt;20 µs，占用 ≤73%</td></tr>
+<tr><td>2</td><td>双腿同时 1 kHz</td><td>两路 SYNC 相位差 &lt;2 µs</td></tr>
+<tr><td>3</td><td>拔一条腿的通信线</td><td>该腿 10 ms 内断使能，另一腿不受影响</td></tr>
+<tr><td>4</td><td>单腿 EMCY 风暴</td><td>另一腿控制帧不丢</td></tr>
+<tr><td>5</td><td>落地冲击（跌落台）</td><td>无 0x0100/0x0020，峰值 iq &lt;5 A</td></tr>
+<tr><td>6</td><td>MIT 大阶跃</td><td>3.09 rad 无超速，iq 峰 &lt;1.5 A（已有脚本）</td></tr>
+<tr><td>7</td><td>bus-off 恢复</td><td>恢复后不自动输出力矩</td></tr>
+<tr><td>8</td><td>5M 数据段眼图</td><td>5 连接器、1.2 m 下眼高/眼宽达标</td></tr>
+<tr><td>9</td><td>EMC：电机满功率 PWM</td><td>错误帧 &lt;1 次/小时</td></tr>
+<tr><td>10</td><td>电池欠压</td><td>降额、不摔</td></tr>
+</tbody>
+</table>
+
+<h2>13. 未决项</h2>
+
+<table>
+<thead><tr><th>#</th><th>问题</th><th>建议</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>踝关节 1 还是 2 自由度</td><td>1 → 5 轴/腿，本方案直接成立；2 → 按 §1.1 四选一</td></tr>
+<tr><td>2</td><td>主控是否支持 2 路 FDCAN + 同源触发</td><td>Linux 用两路 SocketCAN 无法同源，需 MCU 或带触发同步的适配器</td></tr>
+<tr><td>3</td><td>85 MHz 是否可接受</td><td>先验证；量产前评估 PLLQ=80（SYSCLK 160）</td></tr>
+<tr><td>4</td><td>减速比与额定力矩来源</td><td>产线写 0x2002/0x2003，随序列号存档</td></tr>
+<tr><td>5</td><td>是否加抱闸</td><td>双足站立断电必须抱闸或重力补偿，否则跪倒</td></tr>
+<tr><td>6</td><td>跑跳是否需要 2 kHz</td><td>需要则周期减半 + 反馈分组，或双总线/腿</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2>附：关键数值速查</h2>
+
+<table>
+<thead><tr><th>项</th><th>值</th><th>来源</th></tr></thead>
+<tbody>
+<tr><td>电流/速度/位置环</td><td>20 kHz / 2 kHz / 2 kHz</td><td><code>servo_isr.c:997</code></td></tr>
+<tr><td>编码器</td><td>2²¹ counts/rev，21 bit</td><td><code>app_param.h:40</code></td></tr>
+<tr><td>极对数</td><td>14</td><td><code>bsp_servo.h:231</code></td></tr>
+<tr><td>Kt</td><td>0.091 N·m/A × 温度补偿</td><td><code>servo_isr.c:378</code></td></tr>
+<tr><td>iq 限幅</td><td>5.0 A（速度环 3.0 A）</td><td><code>servo_isr.c:373</code></td></tr>
+<tr><td>峰值力矩（电机侧）</td><td>0.455 N·m</td><td>5 A × 0.091</td></tr>
+<tr><td>峰值力矩（输出侧）</td><td><b>4.55 N·m</b></td><td>× 减速比 10（2026-11-22 用户确认）</td></tr>
+<tr><td>位置环</td><td>Kp=100，Amax=30 rad/s²，ErrMax=6 rad</td><td><code>pos_loop.h</code></td></tr>
+<tr><td>MIT 默认</td><td>kp=30，kd=0.05，EP_MAX=1.0 rad</td><td><code>app_param.c:29</code></td></tr>
+<tr><td>MIT 整形</td><td>15 rad/s，180 rad/s²</td><td><code>servo_isr.c:596-607</code></td></tr>
+<tr><td>命令超时 / deadman</td><td>20 ms / 2000 ms</td><td><code>servo_isr.c:559</code>、<code>servo_cmd.c:86</code></td></tr>
+</tbody>
+</table>
+
+<footer>
+双足机器人关节模组 CAN FD 总线协议 · 工程落地设计 v1.1 · 2026-11-22<br>
+拓扑：2 × (5 节点 / 1 条总线) · 1 kHz · 1M/5M · 占用 72.5%
+</footer>
+
+</div>
+</body>
+</html>

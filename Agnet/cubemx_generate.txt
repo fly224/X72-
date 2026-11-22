@@ -1,0 +1,3 @@
+config load "G:/FOC/X72/Firmware/FM_Servo_V3/embedded_project/STM32G474_App/X72_FOC.ioc"
+generate code "G:/FOC/X72/Firmware/FM_Servo_V3/embedded_project/STM32G474_App"
+exit

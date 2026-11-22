@@ -1,0 +1,55 @@
+{
+  "csv": "G:\\FOC\\X72\\Agnet\\full_1000rpm_20261119_204554.csv",
+  "pre": {
+    "rl": {
+      "r_mohm": 400.01,
+      "l_uh": 77.26
+    },
+    "fi": null,
+    "mech": [
+      {
+        "cmd": "(",
+        "name": "扫频 20..1000Hz",
+        "tail": "[CMD] MI start sweep 20..1000Hz amp=0.40A"
+      },
+      {
+        "cmd": ")",
+        "name": "摩擦 8pts",
+        "tail": "[CMD] MI refused: busy (send D first)"
+      },
+      {
+        "cmd": "<",
+        "name": "惯量 iq 1A/2A",
+        "tail": "\u0000\u0000�\u0000\u0000\u0000\u0000\u0002@��A\u0000\u0000�C�\u0002[CMD] MI start inertia iq 1A/2A"
+      },
+      {
+        "cmd": "}",
+        "name": "齿槽 2rpm 1rev",
+        "tail": "[CMD] MI FAIL fault present (X)"
+      }
+    ]
+  },
+  "rows": [],
+  "aborted": "active_mode=0",
+  "log": [
+    "[ok] 初始：使能=0 故障=0 在环=0 err=0x0000",
+    "\n=== 前置校准 ===",
+    "[1/6] C 电流零点: [CMD] CAL start (200 ms, keep motor still)",
+    "[2/6] Z 电角度 (第1次): [CMD] IDENT ok ratio=12.84 pn=13 dir=+1 off=-31.92deg zero=-10.07deg n=60/78 bad=0 moe=0",
+    "[3/6] ^ 编码器校准: 跳过（默认）。原因：^ 期间 MT6835 自校准会让角度输出短暂不可信，速度环随即置 f=0x02 编码器故障，X 清不掉、必须 ! 软复位；且写入 EEPROM 后需断电 >6 s 才生效。本板 cal=1/z=1 已具备可用的编码器标定。",
+    "[4/6] @ R/L: [CMD] RL ok R=400.01mohm L=77.26uH Z=0.63ohm iamp=1.59A n=60 |v|=0.80V |i|=2.00A moe=0",
+    "[5/6] + ψ/R/L: [CMD] FI start 1000rpm id 0/-1/-2/-3 then 300rpm id 0/-2 ~9s\r\n[FI] 0 id=-0.00 iq=3.00 vd=0.00 vq=0.79 we=-0.00\r\n[FI] 1 i",
+    "  [ok] 机械辨识前 前已清故障",
+    "[6/6] ( 机械 扫频 20..1000Hz   : [CMD] MI start sweep 20..1000Hz amp=0.40A",
+    "[6/6] ) 机械 摩擦 8pts         : [CMD] MI refused: busy (send D first)",
+    "[6/6] < 机械 惯量 iq 1A/2A     : \u0000\u0000�\u0000\u0000\u0000\u0000\u0002@��A\u0000\u0000�C�\u0002[CMD] MI start inertia iq 1A/2A",
+    "[6/6] } 机械 齿槽 2rpm 1rev    : [CMD] MI FAIL fault present (X)",
+    "\n=== 温升电气参数采集 ===",
+    "[ok] 速度环：使能=0 故障=1 实际在环=0",
+    "\n==================================================================================",
+    "汇总",
+    "==================================================================================",
+    "前置: {\"rl\": {\"r_mohm\": 400.01, \"l_uh\": 77.26}, \"fi\": null, \"mech\": [{\"cmd\": \"(\", \"name\": \"扫频 20..1000Hz\", \"tail\": \"[CMD] MI start sweep 20..1000Hz amp=0.40A\"}, {\"cmd\": \")\", \"name\": \"摩擦 8pts\", \"tail\": \"[CMD] MI refused: busy (send D first)\"}, {\"cmd\": \"<\", \"name\": \"惯量 iq 1A/2A\", \"tail\": \"\\u0000\\u0000�\\u0000\\u0000\\u0000\\u0000\\u0002@��A\\u0000\\u0000�C�\\u0002[CMD] MI start inertia iq 1A/2A\"}, {\"cmd\": \"}\", \"name\": \"齿槽 2rpm 1rev\", \"tail\": \"[CMD] MI FAIL fault present (X)\"}]}",
+    "[ABORT] active_mode=0"
+  ]
+}

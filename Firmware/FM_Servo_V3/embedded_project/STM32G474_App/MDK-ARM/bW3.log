@@ -1,0 +1,12 @@
+*** Using Compiler 'V6.24', folder: 'E:\keil5c51\51\ARM\ARMCLANG\Bin'
+Build target 'X72_FOC'
+../Core/Src/main.c(76): warning: "PROD_BUILD=1 (production): CAN test harness + ident fault-injection DISABLED" [-W#warnings]
+   76 | #warning "PROD_BUILD=1 (production): CAN test harness + ident fault-injection DISABLED"
+      |  ^
+1 warning generated.
+compiling main.c...
+linking...
+Program Size: Code=111124 RO-data=2240 RW-data=260 ZI-data=27564  
+FromELF: creating hex file...
+"X72_FOC\X72_FOC.axf" - 0 Error(s), 1 Warning(s).
+Build Time Elapsed:  00:00:02

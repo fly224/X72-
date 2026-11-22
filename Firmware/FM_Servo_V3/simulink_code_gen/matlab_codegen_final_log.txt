@@ -1,0 +1,59 @@
+[three_loop_params] Ts_i=5e-05 s (20.0 kHz)  N_w=10 (2.00 kHz)  N_p=20 (1.00 kHz)
+=== 目标路径: G:\FOC\X72\Firmware\FM_Servo_V3\simulink_code_gen ===
+--- 1/5 构建部署模型 ---
+[three_loop_params] Ts_i=5e-05 s (20.0 kHz)  N_w=10 (2.00 kHz)  N_p=20 (1.00 kHz)
+[WARN] 参数 PreserveBusStructures 在当前版本不可用，已跳过
+[WARN] 参数 ProdWordSize 在当前版本不可用，已跳过
+[build] Ts_i=5e-05 s -> N_w=10 (2.00 kHz), N_p=20 (1.00 kHz)
+[OK] deploy model saved: G:\FOC\X72\Firmware\FM_Servo_V3\simulink_code_gen\three_loop_deploy.slx
+[OK] 构建脚本与控制律已复制 (8 个)
+--- 2/5 slbuild (ert.tlc / ARM Cortex-M) ---
+### 正在启动 three_loop_deploy 的编译过程
+### 正在为 '模型特定' 文件夹结构生成代码和工件
+### 正在将代码生成到编译文件夹中: G:\FOC\X72\Firmware\FM_Servo_V3\simulink_code_gen\three_loop_deploy_ert_rtw
+### 'three_loop_deploy' 的生成代码是最新的，因为未发现任何结构性、参数或代码替换库更改。
+### 正在保存二进制信息缓存。
+### 已成功完成 three_loop_deploy 的代码生成
+### 'three_loop_deploy' 的 Simulink 缓存工件是在 'G:\FOC\X72\Firmware\FM_Servo_V3\simulink_code_gen\three_loop_deploy.slxc' 中创建的。
+
+编译摘要
+
+编译了 0 个模型，共 1 个模型(1 个模型已经是最新的)
+编译持续时间: 0h 0m 11.702s
+[OK] 代码生成: G:\FOC\X72\Firmware\FM_Servo_V3\simulink_code_gen\three_loop_deploy_ert_rtw
+--- 3/5 平铺核心源码 ---
+[OK] 平铺 6 个 .c/.h 到目标根（已排除 ert_main.c）
+--- 4/5 导出 SIL 输入/期望输出 ---
+[OK] sil_input.csv / sil_expected.csv
+--- 5/5 接口核验 ---
+init=1 step=1 U/Y=1 输入=11/11 输出=5/5 无SPS=1 可调=1 single=1 单精度数学=1
+
+=== 完成 ===
+模型   : G:\FOC\X72\Firmware\FM_Servo_V3\simulink_code_gen\three_loop_deploy.slx
+源码   : G:\FOC\X72\Firmware\FM_Servo_V3\simulink_code_gen (根目录平铺 6 个 .c/.h)
+完整包 : G:\FOC\X72\Firmware\FM_Servo_V3\simulink_code_gen\three_loop_deploy_ert_rtw
+核验   : G:\FOC\X72\Firmware\FM_Servo_V3\simulink_code_gen\model_io_check.txt
+
+ans = 
+
+  包含以下字段的 struct:
+
+              has_init: 1
+              has_step: 1
+                 has_U: 1
+                 has_Y: 1
+              in_found: [1 1 1 1 1 1 1 1 1 1 1]
+             out_found: [1 1 1 1 1]
+              in_names: {'ia'  'ib'  'ic'  'vbus'  'theta_m'  'omega_m'  'pos_ref'  'en'  'par_c'  'par_w'  'par_p'}
+             out_names: {'duty'  'iq_ref'  'w_ref'  'iq_used'  'ticks'}
+                no_sps: 1
+             n_lines_c: 343
+             n_lines_h: 103
+                 nflat: 6
+               tunable: 1
+    fixed_pid_literals: 0
+             is_single: 1
+           single_math: 1
+                  n_in: 11
+                 n_out: 5
+

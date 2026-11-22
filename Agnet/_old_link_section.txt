@@ -1,0 +1,115 @@
+# --------------------------------------------------------------------------
+# 串口
+# --------------------------------------------------------------------------
+class Link:
+    def __init__(self, port):
+        self.port = port
+        self.s = serial.Serial(port, BAUD, timeout=0.02)
+        time.sleep(0.1)
+        self.s.reset_input_buffer()
+
+    def close(self):
+        try:
+            self.s.close()
+        except Exception:
+            pass
+
+    def write(self, data):
+        if isinstance(data, str):
+            data = data.encode("ascii")
+        self.s.write(data)
+        self.s.flush()
+
+    def status(self, tries=4):
+        """发 S 并解析成 dict。回显被二进制/遥测顶掉时重试，全失败返回 {}。
+
+        返回的 dict 里除了解析出的键值，还有 line（整行原文）供打印。
+        """
+        for _ in range(tries):
+            self.s.reset_input_buffer()
+            self.write("S")
+            buf = bytearray()
+            t0 = time.time()
+            while time.time() - t0 < 0.6:
+                d = self.s.read(1024)
+                if d:
+                    buf += d
+                    i = buf.rfind(b"[CMD] st")
+                    if i >= 0 and b"\r\n" in buf[i:]:
+                        break
+                else:
+                    time.sleep(0.005)
+            i = buf.rfind(b"[CMD] st")
+            if i < 0:
+                continue
+            line = bytes(buf[i:]).split(b"\r\n")[0].decode("ascii", "replace")
+            d = {"line": line}
+            for m in re.finditer(r"([A-Za-z_]\w*)=(-?[0-9a-fA-Fx./+-]+)", line):
+                d[m.group(1)] = m.group(2)
+            return d
+        return {}
+
+    def query(self, cmd, timeout=0.6):
+        """发一条查询并收它自己的回显行（用于回读副作用后的状态）。
+
+        为什么需要它：辨识结果行的**行尾**会被遥测帧挤掉 —— 实测
+        "rev=1.200 ->cog ok" 收到的是 "rev=1.20"，于是"回显里有没有
+        ->cog ok"这个判据直接误报成"装表被拒绝"。正确做法是回读状态量，
+        验证副作用真的发生了，而不是信任那一行字。
+        """
+        self.s.reset_input_buffer()
+        self.write(cmd)
+        buf = bytearray()
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            d = self.s.read(512)
+            if d:
+                buf += d
+                i = buf.rfind(b"[CMD]")
+                if i >= 0 and b"\r\n" in buf[i:]:
+                    break
+            else:
+                time.sleep(0.005)
+        i = buf.rfind(b"[CMD]")
+        if i < 0:
+            return ""
+        return clean(bytes(buf[i:]).split(b"\r\n")[0].decode("ascii", "replace"))
+
+    def wait_for(self, stops, timeout, label="", hb=3.0):
+        """被动收直到任一 stop 出现或超时。返回 (文本, 耗时 s)。"""
+        buf = bytearray()
+        t0 = time.time()
+        last_hb = 0.0
+        while True:
+            d = self.s.read(1024)
+            if d:
+                buf += d
+                txt = bytes(buf).decode("ascii", "replace")
+                for w in stops:
+                    if w in txt:
+                        return txt, time.time() - t0
+            el = time.time() - t0
+            if el >= timeout:
+                return bytes(buf).decode("ascii", "replace"), el
+            if label and (el - last_hb) >= hb:
+                last_hb = el
+                print("        ... %-10s %3.0f / %3.0f s" % (label, el, timeout), flush=True)
+            if not d:
+                time.sleep(0.004)
+
+    def run(self, cmd, stops, timeout, label=""):
+        """发一个激励字符并等结束标记。
+
+        返回 (文本, 耗时, refused)。refused 非空表示固件当场拒收（前置条件
+        不满足），此时不会有结束标记，必须立刻返回而不是白等到超时。
+        """
+        self.s.reset_input_buffer()
+        self.write(cmd)
+        txt, el = self.wait_for(stops + ["refused"], timeout, label)
+        refused = None
+        m = re.search(r"\[CMD\] \w+ refused[^\r\n]*", txt)
+        if m:
+            refused = m.group(0).strip()
+        return txt, el, refused
+
+

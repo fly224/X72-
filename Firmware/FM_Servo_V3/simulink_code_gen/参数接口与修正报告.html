@@ -1,0 +1,241 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>三环 PID 参数对外接口与频率修正报告</title>
+<style>
+  :root { --bg:#f5f7fa; --card:#fff; --ink:#1a1a1a; --mut:#6b7280; --line:#e5e7eb;
+          --good:#0a7d33; --warn:#b45309; --bad:#b91c1c; --accent:#2563eb; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--ink); line-height:1.65; }
+  .wrap { max-width:1020px; margin:0 auto; padding:32px 20px 80px; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  .sub { color:var(--mut); margin-bottom:24px; }
+  h2 { font-size:19px; margin:32px 0 12px; border-left:4px solid var(--accent); padding-left:10px; }
+  h3 { font-size:16px; margin:20px 0 8px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px;
+          padding:18px 20px; margin:12px 0; }
+  table { border-collapse:collapse; width:100%; font-size:14px; }
+  th,td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+  th { background:#f0f4f9; font-weight:600; }
+  .kpi { display:flex; gap:12px; flex-wrap:wrap; margin:12px 0; }
+  .kpi .b { flex:1; min-width:200px; background:var(--card); border:1px solid var(--line);
+             border-radius:10px; padding:14px 16px; }
+  .kpi .n { font-size:22px; font-weight:700; }
+  .kpi .l { color:var(--mut); font-size:13px; margin-top:2px; }
+  .tag { display:inline-block; padding:2px 10px; border-radius:20px; font-size:12px; font-weight:600; }
+  .t-good { background:#e7f6ec; color:var(--good); }
+  .t-warn { background:#fdf1e3; color:var(--warn); }
+  .t-bad  { background:#fdeaea; color:var(--bad); }
+  code { background:#eef2f7; padding:1px 6px; border-radius:4px; font-size:13px; }
+  .note { background:#eef4ff; border-left:3px solid var(--accent); padding:10px 14px;
+          border-radius:6px; font-size:13px; margin:12px 0; }
+  .warnbox { background:#fdf6e3; border-left:3px solid var(--warn); padding:10px 14px;
+             border-radius:6px; font-size:13px; margin:12px 0; }
+  ul { margin:8px 0 8px 20px; padding:0; }
+  li { margin:5px 0; }
+  .mono { font-family:Consolas,"Courier New",monospace; font-size:13px; }
+  pre { background:#f7f9fc; border:1px solid var(--line); border-radius:8px;
+        padding:12px 14px; overflow-x:auto; font-size:13px; line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>三环 PID 参数对外接口与频率修正报告</h1>
+<div class="warnbox"><strong>⚠ 2026-11-15 18:00 更新：节拍已切回 20 kHz。</strong>
+本页以下 <code>Ts_i=100e-6 / dt=1e-4 / N_w=5 / N_p=10 / gain_comp=0.0021 / 10:2:1</code>
+为 10 kHz 阶段历史记录；当前值 <code>Ts_i=50e-6 / dt=5e-5 / N_w=10 / N_p=20 /
+gain_comp=0.00105</code>、tick 20:2:1，速度环 2 kHz / 位置环 1 kHz 与 PID 默认值不变。
+详见 <code>README.md</code> 与 <code>sim_check/results/仿真效果报告.html</code>。
+18:40 已完成 single 化（<code>real32_T</code> + <code>sinf/cosf/sqrtf</code>，RAM 392→232 B，
+host SIL 1.79e-7），详见 <code>单精度化说明.md</code>；实机仍需 DWT 复测单拍周期。</div>
+<div class="sub">依据 <span class="mono">G:\FOC\X72\Agnet\电流环整定与三环频率修正.md</span> ｜
+STM32G474 / 10 kHz ｜ 2026-11-15 ｜ 交付目录 <span class="mono">FM_Servo_V3\simulink_code_gen</span></div>
+
+<div class="kpi">
+  <div class="b"><div class="n">4 / 4</div><div class="l">频率错配从参数源正规修正，补丁退役</div></div>
+  <div class="b"><div class="n">8 项可调</div><div class="l">PID / 限幅参数运行时可整定，不再需 codegen</div></div>
+  <div class="b"><div class="n">7.17e-12</div><div class="l">SIL 3000 拍 C 代码与模型最大误差</div></div>
+  <div class="b"><div class="n">14 / 14</div><div class="l">参数接口自检 PASS（含跨 2π wrap）</div></div>
+</div>
+
+<div class="card">
+<h3>结论先行</h3>
+<p>文档的 4 处频率错配（<code>dt / N_w / N_p / gain_comp</code>）不再靠手改生成 C 或幂等补丁，
+而是从唯一参数源 <code>three_loop_params.m</code>（<code>Ts_i=100e-6</code>）重新建模生成，
+脚本 <code>generate_three_loop_code</code> 一次跑通（文档 §5.3 的临时目录阻塞用工程内 TMP 重定向已解除）。</p>
+<p>在此基础上把三组参数从 <code>InlineParams</code> 固化常量改为<strong>顶层 Inport</strong>
+（<code>U.par_c[11] / U.par_w[5] / U.par_p[4]</code>），新增手工层
+<code>three_loop_tuning.h/.c</code> 提供 8 个可调参数的定点 ID 接口、范围校验、原子提交与位置 wrap。
+上位机 → database → 本层 → <code>U</code> 的链路完整，且周期/标定等固定项被保护，不会被写坏时序。</p>
+<p class="mono">验证：SIL 7.17e-12 PASS；tuning_test 14/14 PASS；patch --check 4/4「模型侧已修正」；GCC 编译 0 警告。</p>
+</div>
+
+<h2>1. 文档问题逐条处置</h2>
+<div class="card">
+<table>
+<tr><th>文档章节</th><th>问题</th><th>本轮处置</th><th>证据</th></tr>
+<tr><td>§3.1</td><td>电流环 <code>dt</code> 5e-5 vs 实际 1e-4，Ki 只有一半</td><td><code>P.Ts_i=100e-6</code> → <code>par_c[2]=1e-4</code></td><td class="mono">three_loop_deploy.c:146-149 从 U.par_c[2] 取 dt</td></tr>
+<tr><td>§3.2</td><td>速度环 /10、位置环 /20 在 10 kHz 下降为一半</td><td><code>N_w=5</code>、<code>N_p=10</code>（由 Ts 自动派生）</td><td class="mono">:74 用 U.par_p[3]、:87 用 U.par_w[4]</td></tr>
+<tr><td>§5.1 末行</td><td>手改版漏掉延时补偿翻倍</td><td><code>gain_comp = 14×1.5×100µs = 0.0021</code></td><td class="mono">three_loop_deploy.c:51</td></tr>
+<tr><td>§3.3</td><td>多圈 pos_ref 与单圈 theta_m 跨 2π 跳变 → 过流</td><td><code>ThreeLoop_WrapPosRef/Ex()</code>（含 dir_sign）</td><td>tuning_test 跨 2π 用例 PASS，err=0.10 rad</td></tr>
+<tr><td>§5.3</td><td><code>save_system</code> 被 C:\Windows\Temp 权限阻塞</td><td>TMP/TEMP/TMPDIR + MATLAB_PREFDIR 重定向后成功</td><td>本轮 generate 退出 0，.slx 重建成功</td></tr>
+<tr><td>§6.1</td><td>改增益必须重建模型</td><td>参数改 Inport，运行时可调</td><td class="mono">model_io_check.txt：参数可调=1，无固定 PID 字面量</td></tr>
+</table>
+<div class="note"><strong>节拍口径已变</strong>：<code>step()</code> 现在是 10 kHz，SIL 末拍
+<code>ticks = 3000 / 600 / 300</code>（10 : 2 : 1），不再是 20 kHz 时代的 20 : 2 : 1。
+速度环 <code>Ts_w=500µs</code>、位置环 <code>Ts_p=1ms</code> 仍成立。</div>
+</div>
+
+<h2>2. 对外接口链路</h2>
+<div class="card">
+<svg viewBox="0 0 980 210" width="100%" role="img" aria-label="参数接口链路图">
+  <defs><marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+    <path d="M0,0 L0,6 L8,3 z" fill="#2563eb"/></marker></defs>
+  <rect x="12"  y="45" width="175" height="72" rx="8" fill="#f7f9fc" stroke="#6b7280" stroke-width="1.3"/>
+  <text x="100" y="70" text-anchor="middle" font-size="13" font-weight="600">上位机 / MAVLink</text>
+  <text x="100" y="90" text-anchor="middle" font-size="11" fill="#6b7280">定点 int32，1 ms 任务</text>
+  <text x="100" y="108" text-anchor="middle" font-size="11" fill="#6b7280">权限总闸 30068</text>
+
+  <rect x="225" y="45" width="175" height="72" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="312" y="70" text-anchor="middle" font-size="13" font-weight="600">database</text>
+  <text x="312" y="90" text-anchor="middle" font-size="11">set_app_* / get_app_*</text>
+  <text x="312" y="108" text-anchor="middle" font-size="11" fill="#6b7280">范围/单位/FlashDB</text>
+
+  <rect x="438" y="45" width="205" height="72" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="540" y="66" text-anchor="middle" font-size="13" font-weight="600">three_loop_tuning.c</text>
+  <text x="540" y="86" text-anchor="middle" font-size="11">ParamSet(0x01..0x08)</text>
+  <text x="540" y="104" text-anchor="middle" font-size="11" fill="#6b7280">影子结构体 + 原子 Apply</text>
+
+  <rect x="681" y="45" width="130" height="72" rx="8" fill="#f0fdf4" stroke="#0a7d33" stroke-width="1.5"/>
+  <text x="746" y="70" text-anchor="middle" font-size="13" font-weight="600">U.par_*</text>
+  <text x="746" y="90" text-anchor="middle" font-size="11">11 + 5 + 4 doubles</text>
+  <text x="746" y="108" text-anchor="middle" font-size="11" fill="#0a7d33">固定项受保护</text>
+
+  <rect x="846" y="45" width="120" height="72" rx="8" fill="#f0fdf4" stroke="#0a7d33" stroke-width="1.5"/>
+  <text x="906" y="70" text-anchor="middle" font-size="13" font-weight="600">step()</text>
+  <text x="906" y="90" text-anchor="middle" font-size="11">10 kHz ISR</text>
+  <text x="906" y="108" text-anchor="middle" font-size="11" fill="#0a7d33">→ Y.duty[3]</text>
+
+  <line x1="188" y1="81" x2="223" y2="81" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ar)"/>
+  <line x1="401" y1="81" x2="436" y2="81" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ar)"/>
+  <line x1="644" y1="81" x2="679" y2="81" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ar)"/>
+  <line x1="812" y1="81" x2="844" y2="81" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <rect x="12" y="140" width="954" height="48" rx="8" fill="#fff8ec" stroke="#b45309" stroke-width="1.2"/>
+  <text x="30" y="160" font-size="12" fill="#b45309">控制 ISR 只填 8 个信号字段：ia/ib/ic/vbus/theta_m/omega_m/pos_ref/en，并用 ThreeLoop_WrapPosRefEx() 折叠位置指令；</text>
+  <text x="30" y="178" font-size="12" fill="#b45309">参数写入在 1 ms 非实时任务，禁止在 ISR 解析协议或直接改 U.par_c[2] 等固定项。</text>
+</svg>
+</div>
+
+<h2>3. 可调参数表（8 项，ID 0x01–0x08）</h2>
+<div class="card">
+<table>
+<tr><th>ID</th><th>名称</th><th>字段</th><th>单位</th><th>默认值</th><th>scale</th><th>raw 默认</th><th>范围</th></tr>
+<tr><td class="mono">0x01</td><td>CUR_KP</td><td class="mono">kp_i</td><td>V/A</td><td class="mono">0.713141532365</td><td>×1e3</td><td class="mono">713</td><td>0.05 – 3.0</td></tr>
+<tr><td class="mono">0x02</td><td>CUR_KI</td><td class="mono">ki_i</td><td>V/(A·s)</td><td class="mono">2378.18563877</td><td>×1e3</td><td class="mono">2378186</td><td>100 – 10000</td></tr>
+<tr><td class="mono">0x03</td><td>VEL_KP</td><td class="mono">kp_w</td><td>A/(rad/s)</td><td class="mono">0.0729227202682</td><td>×1e6</td><td class="mono">72923</td><td>0 – 1.0</td></tr>
+<tr><td class="mono">0x04</td><td>VEL_KI</td><td class="mono">ki_w</td><td>A/(rad/s)/s</td><td class="mono">10.1906891515</td><td>×1e3</td><td class="mono">10191</td><td>0 – 100</td></tr>
+<tr><td class="mono">0x05</td><td>POS_KP</td><td class="mono">kp_p</td><td>(rad/s)/rad</td><td class="mono">50.2654824574</td><td>×1e3</td><td class="mono">50265</td><td>0 – 200</td></tr>
+<tr><td class="mono">0x06</td><td>VEL_MAX</td><td class="mono">w_max</td><td>rad/s</td><td class="mono">120.0</td><td>×1e3</td><td class="mono">120000</td><td>1 – 200</td></tr>
+<tr><td class="mono">0x07</td><td>I_MAX</td><td class="mono">i_max</td><td>A</td><td class="mono">9.0</td><td>×1e3</td><td class="mono">9000</td><td>0.5 – 9.0（硬件峰值）</td></tr>
+<tr><td class="mono">0x08</td><td>DUTY_MAX</td><td class="mono">max_duty</td><td>—</td><td class="mono">0.95</td><td>×1e3</td><td class="mono">950</td><td>0.5 – 0.98</td></tr>
+</table>
+<div class="note"><strong>只读 ID 0x81–0x85</strong>（写入返回 READ_ONLY）：
+CTRL_TS_US=100、N_W=5、N_P=10、GAIN_COMP=2100（×1e6 = 0.0021）、POLE_PAIRS=14。
+这些是时序/标定自检量，上位机可显示但不可改。</div>
+</div>
+
+<h2>4. 固定项保护（U.par_* 展开映射）</h2>
+<div class="card">
+<table>
+<tr><th>数组</th><th>可调索引</th><th>固定索引（🔒 禁止上位机改写）</th></tr>
+<tr><td class="mono">par_c[11]</td><td>0 kp_i、1 ki_i、6 max_duty、10 i_max</td>
+<td>2 dt=1e-4、3/4 Ld/Lq=113.5µH、5 psi=7.593mWb、7 overmod=1、8 mag_vd_max=0.98、9 dec=3</td></tr>
+<tr><td class="mono">par_w[5]</td><td>0 kp_w、1 ki_w、3 i_max（与 par_c[10] 同步）</td><td>2 Ts_w=5e-4、4 N_w=5</td></tr>
+<tr><td class="mono">par_p[4]</td><td>0 kp_p、1 w_max</td><td>2 Ts_p=1e-3、3 N_p=10</td></tr>
+</table>
+<div class="warnbox">生成代码把 <code>dt/N_w/N_p</code> 也暴露成 <code>U</code> 字段（因为整组参数走 Inport）。
+<strong>只能通过 <code>ThreeLoop_Tuning_Apply()</code> 写入</strong>；直接改 <code>U.par_c[2]</code>
+会重演文档 §3 的时序错配。上电顺序必须是「initialize → AppParamInit → Tuning_Init → 回放参数 → 启 ISR」。</div>
+</div>
+
+<h2>5. 整定公式（参数怎么设）</h2>
+<div class="card">
+<pre>电流环（IMC / 极点抵消）
+  wc   = kp_i / Ld = 0.7131415 / 113.5e-6 = 6283 rad/s ≈ 1000 Hz
+  零点 = ki_i / kp_i = 3334.8 rad/s = R/L (0.3785Ω / 113.5µH)
+  => 改 kp_i 必须同步 ki_i = kp_i × 3334.8；带宽降到 500Hz: kp_i=0.3566, ki_i=1189.1
+
+速度环 / 位置环
+  kp_w = (2ζ·ww·J − B)/Kt,  ki_w = ww²·J/Kt   (ζ=0.9, ww=2π·40)
+  kp_p ≈ 2π·f_p                                (f_p=8 Hz -> 50.265)
+  f_p ≲ f_w/5，否则级联失稳</pre>
+<p>推荐顺序：<code>en=0</code> → 电流环（Kp 后同步 Ki）→ 速度环（空载→带载）→ 位置环（小→大阶跃）；
+每步 <code>ParamGet</code> 回读确认，满意后由 database 保存 Flash。使能态写入会被拒
+（<code>WRITE_STATE_ERROR</code>），越界 / NaN / 未知 ID / 只读项分别返回对应状态码。</p>
+</div>
+
+<h2>6. 验证结果</h2>
+<div class="card">
+<table>
+<tr><th>项目</th><th>证据</th><th>结果</th></tr>
+<tr><td>4 处频率错配</td><td><code>python patch_gen_code.py --check</code></td><td><span class="tag t-good">4/4 模型侧已修正</span></td></tr>
+<tr><td>接口核验</td><td><code>model_io_check.txt</code>：11/11 输入、5/5 输出、无 SPS、参数可调=1、无固定 PID 字面量</td><td><span class="tag t-good">PASS</span></td></tr>
+<tr><td>host 编译</td><td>MinGW GCC <code>-std=c99 -O2 -Wall</code> ×2</td><td><span class="tag t-good">0 error / 0 warning</span></td></tr>
+<tr><td>SIL 数值一致性</td><td>3000 拍，<code>max|Δduty| = 7.17e-12</code>；ticks 3000/600/300</td><td><span class="tag t-good">PASS</span></td></tr>
+<tr><td>参数接口自检</td><td><code>tuning_test.exe</code>：默认值、定点、只读、使能拒写、越界、跨 2π wrap、固定项保护</td><td><span class="tag t-good">14/14 PASS</span></td></tr>
+<tr><td>符号 / 内存</td><td><code>nm -S</code>：step 0x930 B(host x64)、U 0xe0=224 B、Y 0x48=72 B、DW 0x60=96 B</td><td>合计 392 B 静态 RAM</td></tr>
+<tr><td>ARM 目标编译</td><td>本机无 <code>arm-none-eabi-gcc</code></td><td><span class="tag t-warn">未覆盖</span></td></tr>
+</table>
+</div>
+
+<h2>7. 局限与后续</h2>
+<div class="card">
+<div class="warnbox"><strong>① 必须重测 DWT 周期数</strong>：参数改 Inport 后编译器不再能常量折叠，
+<code>step()</code> 多了数组读取与 <code>par_c[9]==3</code> 一类运行时分支。原实测 9282 cyc / 54.6%，
+新版本需在实机重新量一次，确认仍 &lt; 100 µs。</div>
+<ul>
+<li>② 根本解法仍是 <strong>single 化回 20 kHz</strong>（文档 §6.2，实测 1813 cyc）。届时把 <code>Ts_i</code> 改回 <code>50e-6</code>，
+<code>dt/N_w/N_p/gain_comp</code> 自动跟回，<strong>可调参数默认值无需改动</strong>。</li>
+<li>③ 协议层尚未落地：<code>database/</code> 为空，<code>set/get_app_*</code> 仍是契约；参数 ID 0x01–0x08 需同步进 MAVLink 消息表与上位机字段表。</li>
+<li>④ 位置模式仍限 ±π；大范围绝对定位需按文档 §6.3 增加多圈 <code>theta_pos</code> 输入。</li>
+<li>⑤ 低速测速量化（§6.4）、电流环带宽实测（§6.5）未解决；未建模死区/弱磁/量化。</li>
+<li>⑥ 生成代码仍是 <code>real_T = double</code>（M4F 单精度 FPU）。</li>
+</ul>
+</div>
+
+<h2>8. 复现与文件</h2>
+<div class="card">
+<pre>set TMP=C:\Users\92714\WorkBuddy\MBD开发\three_loop_pmsm\tmp
+set TEMP=%TMP%
+set TMPDIR=%TMP%
+set MATLAB_PREFDIR=%TMP%\prefs
+
+matlab -sd "G:\FOC\X72\Firmware\FM_Servo_V3\simulink_code_gen" -batch "generate_three_loop_code"
+gcc -std=c99 -O2 -Wall -I. sil_test.c three_loop_deploy.c three_loop_tuning.c -o sil_test.exe -lm &amp;&amp; sil_test.exe
+gcc -std=c99 -O2 -Wall -I. tuning_test.c three_loop_deploy.c three_loop_tuning.c -o tuning_test.exe -lm &amp;&amp; tuning_test.exe
+python patch_gen_code.py --check</pre>
+<table>
+<tr><th>文件</th><th>本轮变更</th></tr>
+<tr><td class="mono">build_three_loop_deploy.m / generate_three_loop_code.m</td><td>参数 Constant → Inport(11/5/4)；SIL 外部输入 29 列；核验改为「参数可调」</td></tr>
+<tr><td class="mono">three_loop_deploy.slx / .c / .h</td><td>重新生成；PID 从 U.par_*[] 读取；11 输入 / 5 输出</td></tr>
+<tr><td class="mono">three_loop_tuning.h/.c</td><td>新增：参数结构体、默认值、范围、定点 ID、原子提交、位置 wrap</td></tr>
+<tr><td class="mono">tuning_test.c / sil_test.c / integration_example.c</td><td>新增自检；SIL 加 Init；示例加 Init 与 wrap</td></tr>
+<tr><td class="mono">patch_gen_code.py</td><td>退役为核验脚本，兼容旧固化版</td></tr>
+<tr><td class="mono">README.md / PID参数对外接口说明.md / 参数接口与修正报告.html</td><td>文档同步</td></tr>
+</table>
+<div class="note">手改版 C 已备份在 <code>three_loop_deploy_ert_rtw/_backup_20261115/</code>；
+host 编译产物在 <code>_host_build/</code>，不加入固件工程。</div>
+</div>
+
+<div class="sub" style="margin-top:28px">结论状态：<span class="tag t-good">GO</span> 模型侧修正与参数接口可进入集成；
+<span class="tag t-warn">上电前必做</span> 实机 DWT 周期数重测、编码器零点标定、VBUS 分压系数；
+<span class="tag t-warn">未覆盖</span> ARM 目标编译、协议层落地、满速弱磁。</div>
+
+</div>
+</body>
+</html>

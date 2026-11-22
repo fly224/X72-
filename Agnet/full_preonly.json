@@ -1,0 +1,42 @@
+{
+  "csv": "G:/FOC/X72/Agnet/full_preonly.csv",
+  "pre": {
+    "rl": {
+      "r_mohm": 294.28,
+      "l_uh": 89.35
+    },
+    "fi": null,
+    "mech": [
+      {
+        "cmd": "<",
+        "name": "惯量 iq 1A/2A",
+        "tail": "[CMD] MI start inertia iq 1A/2A"
+      },
+      {
+        "cmd": ")",
+        "name": "摩擦 8pts 1..200rpm",
+        "tail": "[CMD] MI start fric 8pts 1..200rpm"
+      }
+    ]
+  },
+  "rows": [],
+  "aborted": "pre_only_done",
+  "log": [
+    "[ok] 初始：使能=0 故障=0 在环=0 err=0x0000",
+    "\n=== 前置校准 ===",
+    "[1/6] C 电流零点: 跳过（cal=1 已校准；C 后紧跟 Z 会识别错极对数）",
+    "[2/6] Z 电角度 (第1次): [CMD] IDENT ok ratio=14.14 pn=14 dir=+1 off=-131.89deg zero=-25.92deg n=60/84 bad=0 moe=0   [校验 ratio=14.14 pn=14 OK]",
+    "[3/6] ^ 编码器校准: 跳过（默认）。原因：^ 期间 MT6835 自校准会让角度输出短暂不可信，速度环随即置 f=0x02 编码器故障，X 清不掉、必须 ! 软复位；且写入 EEPROM 后需断电 >6 s 才生效。本板 cal=1/z=1 已具备可用的编码器标定。",
+    "[4/6] @ R/L: [CMD] RL ok R=294.28mohm L=89.35uH Z=0.63ohm iamp=1.58A n=60 |v|=0.59V |i|=2.01A moe=0",
+    "[5/6] + ψ/R/L: �?\u0014!�A\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000 |�A\u001c\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0002�\u000b�A\u0000\u0000 A��[CMD] FI start 1000rpm id 0/-1/-2/-3 then 300rpm id 0/-2 ~9s\r\n[CMD] FI FAIL fau",
+    "  [ok] 机械辨识前 前已清故障",
+    "[6/6] < 机械 惯量 iq 1A/2A     : [CMD] MI start inertia iq 1A/2A",
+    "[6/6] ) 机械 摩擦 8pts 1..200rpm: [CMD] MI start fric 8pts 1..200rpm",
+    "\n[pre-only] 前置全部通过（Z 的 ratio/pn 已校验），按 --pre-only 退出",
+    "\n==================================================================================",
+    "汇总",
+    "==================================================================================",
+    "前置: {\"rl\": {\"r_mohm\": 294.28, \"l_uh\": 89.35}, \"fi\": null, \"mech\": [{\"cmd\": \"<\", \"name\": \"惯量 iq 1A/2A\", \"tail\": \"[CMD] MI start inertia iq 1A/2A\"}, {\"cmd\": \")\", \"name\": \"摩擦 8pts 1..200rpm\", \"tail\": \"[CMD] MI start fric 8pts 1..200rpm\"}]}",
+    "[ABORT] pre_only_done"
+  ]
+}

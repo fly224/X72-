@@ -1,0 +1,18 @@
+{
+  "csv": "G:\\FOC\\X72\\Agnet\\full_1000rpm_20261119_204521.csv",
+  "pre": {},
+  "rows": [],
+  "aborted": "pre_exception_RuntimeError('Z_align_failed: [CMD] IDENT FAIL ratio_bad n=60/0 moe=0')",
+  "log": [
+    "[ok] 初始：使能=0 故障=0 在环=0 err=0x0000",
+    "\n=== 前置校准 ===",
+    "[1/6] C 电流零点: \u0002���A\u0000\u0000\u0016D�8[CMD] CAL start (200 ms, keep motor still)",
+    "[2/6] Z 电角度: [CMD] IDENT FAIL ratio_bad n=60/0 moe=0",
+    "[ERR] 前置阶段异常: RuntimeError('Z_align_failed: [CMD] IDENT FAIL ratio_bad n=60/0 moe=0')",
+    "\n==================================================================================",
+    "汇总",
+    "==================================================================================",
+    "前置: {}",
+    "[ABORT] pre_exception_RuntimeError('Z_align_failed: [CMD] IDENT FAIL ratio_bad n=60/0 moe=0')"
+  ]
+}

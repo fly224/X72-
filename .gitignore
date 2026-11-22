@@ -1,0 +1,61 @@
+# ===== WorkBuddy 工具目录（262 MB，含 tmp / chrome profile）=====
+.workbuddy/
+
+# ===== 历史阶段备份（版本管理由 git 承担）=====
+_backup_ascii_20261121/
+
+# ===== Keil MDK 编译产物 =====
+*.o
+*.d
+*.crf
+*.dep
+*.axf
+*.elf
+*.hex
+*.map
+*.lst
+*.lnp
+*.iex
+*.sct
+*.htm
+*.build_log.htm
+*.uvguix.*
+MDK-ARM/X72_FOC/
+MDK-ARM/Objects/
+MDK-ARM/Listings/
+**/Objects/
+**/Listings/
+**/DebugConfig/
+Firmware/**/*.bin
+
+# 编译/烧录日志（build_*.log, flash_*.log, b1.log, fL2.log 等）
+MDK-ARM/*.log
+*.build_log
+
+# Keil 的 UV 临时目录与 .tmp
+.build_tmp/
+*.tmp
+
+# ===== Simulink 生成物与缓存 =====
+*.slxc
+*.mat
+slprj/
+**/_host_build/
+**/results/
+**/html/
+
+# ===== CMSIS DSP（本工程未引用，45 MB 全部剔除）=====
+Firmware/**/Drivers/CMSIS/DSP/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+
+# ===== 系统与编辑器 =====
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+*.swp
+*~

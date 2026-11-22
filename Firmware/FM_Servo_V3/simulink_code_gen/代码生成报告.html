@@ -1,0 +1,236 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STM32G474 三环 FOC · ERT 代码生成报告</title>
+<style>
+  :root { --bg:#f5f7fa; --card:#fff; --ink:#1a1a1a; --mut:#6b7280; --line:#e5e7eb;
+          --good:#0a7d33; --warn:#b45309; --bad:#b91c1c; --accent:#2563eb; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--ink); line-height:1.65; }
+  .wrap { max-width:1000px; margin:0 auto; padding:32px 20px 80px; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  .sub { color:var(--mut); margin-bottom:24px; }
+  h2 { font-size:19px; margin:32px 0 12px; border-left:4px solid var(--accent); padding-left:10px; }
+  h3 { font-size:16px; margin:20px 0 8px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px;
+          padding:18px 20px; margin:12px 0; }
+  table { border-collapse:collapse; width:100%; font-size:14px; }
+  th,td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+  th { background:#f0f4f9; font-weight:600; }
+  .kpi { display:flex; gap:12px; flex-wrap:wrap; margin:12px 0; }
+  .kpi .b { flex:1; min-width:200px; background:var(--card); border:1px solid var(--line);
+             border-radius:10px; padding:14px 16px; }
+  .kpi .n { font-size:22px; font-weight:700; }
+  .kpi .l { color:var(--mut); font-size:13px; margin-top:2px; }
+  .tag { display:inline-block; padding:2px 10px; border-radius:20px; font-size:12px; font-weight:600; }
+  .t-good { background:#e7f6ec; color:var(--good); }
+  .t-warn { background:#fdf1e3; color:var(--warn); }
+  .t-bad  { background:#fdeaea; color:var(--bad); }
+  code { background:#eef2f7; padding:1px 6px; border-radius:4px; font-size:13px; }
+  .note { background:#eef4ff; border-left:3px solid var(--accent); padding:10px 14px;
+          border-radius:6px; font-size:13px; margin:12px 0; }
+  .warnbox { background:#fdf6e3; border-left:3px solid var(--warn); padding:10px 14px;
+             border-radius:6px; font-size:13px; margin:12px 0; }
+  ul { margin:8px 0 8px 20px; padding:0; }
+  li { margin:5px 0; }
+  .mono { font-family:Consolas,"Courier New",monospace; font-size:13px; }
+  pre { background:#f7f9fc; border:1px solid var(--line); border-radius:8px;
+        padding:12px 14px; overflow-x:auto; font-size:13px; line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>STM32G474 三环 FOC · ERT 嵌入式代码生成报告</h1>
+<div class="sub">48 V / 电流环 20 kHz · 速度环 2 kHz · 位置环 1 kHz ｜ MATLAB R2023b + Embedded Coder 23.2 ｜
+交付路径 <span class="mono">G:\FOC\X72\Firmware\FM_Servo_V3\simulink_code_gen</span> ｜ 2026-11-14</div>
+
+<div class="kpi">
+  <div class="b"><div class="n">6.20e-12</div><div class="l">host SIL 3000 拍最大误差（C == 模型）</div></div>
+  <div class="b"><div class="n">20 : 2 : 1</div><div class="l">tick = 3000 / 300 / 150（实机可在线核对）</div></div>
+  <div class="b"><div class="n">232 B</div><div class="l">静态 RAM（U 64 + Y 72 + DW 96）</div></div>
+  <div class="b"><div class="n"><span class="tag t-good">编译通过</span></div><div class="l">MinGW GCC -std=c99 -O2 -Wall，无警告</div></div>
+</div>
+
+<div class="card">
+<h3>结论先行</h3>
+<p>已从三环闭环仿真模型中提取<strong>纯控制律</strong>，用 <code>ert.tlc</code> + <code>ARM Compatible-&gt;ARM Cortex-M</code>
+生成自包含 ANSI C，直接落到指定的 <code>simulink_code_gen</code> 目录。生成代码实际编译通过，
+并用 host SIL 与 Simulink 部署模型逐拍比对 3000 个 50 µs 采样点，最大占空比误差
+<strong>6.20e-12</strong>；三环累计执行次数 3000 / 300 / 150，证明 20 kHz / 2 kHz / 1 kHz
+的执行频率在生成代码里真实成立，而不只是模型注释。</p>
+<p>裸机集成只需两步：<code>three_loop_deploy_initialize()</code> 上电调一次，
+<code>three_loop_deploy_step()</code> 由 TIM1 20 kHz 更新中断调用。
+目录内已给出 <code>integration_example.c</code>（ADC / MT6835 / CCR 标定模板）与 README 集成步骤。</p>
+</div>
+
+<h2>1. 生成边界：仿真模型 → 部署模型</h2>
+<div class="card">
+<svg viewBox="0 0 980 235" width="100%" role="img" aria-label="生成边界架构图">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#2563eb"/>
+    </marker>
+    <marker id="ag" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#0a7d33"/>
+    </marker>
+  </defs>
+  <rect x="15" y="30" width="270" height="160" rx="10" fill="#f7f9fc" stroke="#6b7280" stroke-width="1.3"/>
+  <text x="150" y="54" text-anchor="middle" font-size="14" font-weight="600">闭环仿真模型（仅工作台）</text>
+  <text x="150" y="78" text-anchor="middle" font-size="12">Test_Harness + 三环控制器</text>
+  <text x="150" y="100" text-anchor="middle" font-size="12" fill="#6b7280">平均逆变器 + SPS PMSM + powergui</text>
+  <text x="150" y="122" text-anchor="middle" font-size="12" fill="#6b7280">Scope / To Workspace / 负载激励</text>
+  <text x="150" y="150" text-anchor="middle" font-size="12" fill="#b91c1c">显式三速率 1ms / 500µs / 50µs</text>
+  <text x="150" y="172" text-anchor="middle" font-size="11" fill="#6b7280">电气域对象不能生成 MCU 代码</text>
+
+  <line x1="290" y1="110" x2="345" y2="110" stroke="#2563eb" stroke-width="2" marker-end="url(#ar)"/>
+  <text x="317" y="98" text-anchor="middle" font-size="11" fill="#2563eb">提取</text>
+
+  <rect x="350" y="30" width="270" height="160" rx="10" fill="#eef4ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="485" y="54" text-anchor="middle" font-size="14" font-weight="600">部署模型 three_loop_deploy</text>
+  <text x="485" y="78" text-anchor="middle" font-size="12">Inport × 8 → ThreeLoop_Controller（原子）</text>
+  <text x="485" y="100" text-anchor="middle" font-size="12" fill="#2563eb">→ Outport × 5</text>
+  <text x="485" y="122" text-anchor="middle" font-size="12">位置环 /20、速度环 /10、电流环每拍</text>
+  <text x="485" y="150" text-anchor="middle" font-size="12" fill="#0a7d33">单速率 50 µs，无 Rate Transition</text>
+  <text x="485" y="172" text-anchor="middle" font-size="11" fill="#6b7280">参数 InlineParams 固化</text>
+
+  <line x1="625" y1="110" x2="680" y2="110" stroke="#0a7d33" stroke-width="2" marker-end="url(#ag)"/>
+  <text x="652" y="98" text-anchor="middle" font-size="11" fill="#0a7d33">slbuild</text>
+
+  <rect x="685" y="30" width="280" height="160" rx="10" fill="#f0fdf4" stroke="#0a7d33" stroke-width="1.5"/>
+  <text x="825" y="54" text-anchor="middle" font-size="14" font-weight="600">ERT C 代码（STM32G474）</text>
+  <text x="825" y="78" text-anchor="middle" font-size="12">three_loop_deploy.c/.h + 4 个头文件</text>
+  <text x="825" y="100" text-anchor="middle" font-size="12">initialize() / step() / U / Y / DW</text>
+  <text x="825" y="122" text-anchor="middle" font-size="12" fill="#0a7d33">自包含，不依赖 SPS 与 MATLAB 库</text>
+  <text x="825" y="150" text-anchor="middle" font-size="12">TIM1 20 kHz ISR 单入口</text>
+  <text x="825" y="172" text-anchor="middle" font-size="11" fill="#6b7280">host SIL 逐拍比对通过</text>
+</svg>
+</div>
+<div class="note">为什么改成单速率：仿真模型用显式 1 ms / 500 µs / 50 µs 三个 <code>SystemSampleTime</code> + Rate Transition，
+适合验证环时序；但 ERT 面向裸机时，单 ISR 更确定、无需 RTOS 调度，也避开多速率代码生成的历史问题。
+位置/速度环在各自 chart 内用计数器分频并 ZOH 保持输出，积分步长仍分别用 1 ms / 500 µs，与仿真完全一致。</div>
+
+<h2>2. 生成的 C 接口</h2>
+<div class="card">
+<table>
+<tr><th>方向</th><th>字段</th><th>单位 / 来源</th></tr>
+<tr><td rowspan="8">输入 <code>three_loop_deploy_U</code><br>（8 × double，64 B）</td>
+<td class="mono">ia, ib, ic</td><td>[A] 三相电流，流入电机为正；ADC1/2 + OPAMP 差分</td></tr>
+<tr><td class="mono">vbus</td><td>[V] 母线电压；VM 分压 ADC</td></tr>
+<tr><td class="mono">theta_m</td><td>[rad] MT6835 21bit 机械角（需标定零点偏置）</td></tr>
+<tr><td class="mono">omega_m</td><td>[rad/s] 机械角速度，编码器差分 + 低通</td></tr>
+<tr><td class="mono">pos_ref</td><td>[rad] 位置指令，机械角，与 theta_m 同坐标系</td></tr>
+<tr><td class="mono">en</td><td>1=使能；0=立即清积分、duty=0.5</td></tr>
+<tr><td colspan="2" class="mono">内部：theta_e = 14·theta_m + π/2 + 0.00105·omega_m；omega_e = 14·omega_m</td></tr>
+<tr><td colspan="2" class="mono">控制器内部完成电流环 20 kHz / 速度环 2 kHz / 位置环 1 kHz，无需外部额外定时器</td></tr>
+<tr><td rowspan="5">输出 <code>three_loop_deploy_Y</code><br>（9 × double，72 B）</td>
+<td class="mono">duty[3]</td><td>[0,1] 三相占空比 → TIM1 CCR1/2/3</td></tr>
+<tr><td class="mono">iq_ref / w_ref</td><td>[A] / [rad/s] 环间指令，用于限流与诊断</td></tr>
+<tr><td class="mono">iq_used</td><td>[A] ±9 A 限幅后的 q 轴电流指令</td></tr>
+<tr><td class="mono">ticks[3]</td><td>电流/速度/位置环累计执行次数，比值恒为 20 : 2 : 1</td></tr>
+<tr><td colspan="2" class="mono">状态 DW：vd_int / vq_int / i_term / cnt / hold_iq / hold_w / n_exec ... 共 96 B</td></tr>
+</table>
+<pre>extern void three_loop_deploy_initialize(void);   /* 上电一次 */
+extern void three_loop_deploy_step(void);         /* TIM1 20 kHz ISR 每拍 */
+
+/* ISR 骨架 */
+U.ia = ...; U.ib = ...; U.ic = ...; U.vbus = ...;
+U.theta_m = ...; U.omega_m = ...; U.pos_ref = ...; U.en = 1.0;
+three_loop_deploy_step();
+TIM1->CCR1 = (uint16_t)(Y.duty[0] * PWM_ARR + 0.5);   /* A/B/C 同理 */</pre>
+</div>
+
+<h2>3. 生成参数（已内联固化到 C）</h2>
+<div class="card">
+<table>
+<tr><th>环</th><th>执行频率</th><th>生成代码中的常数</th></tr>
+<tr><td>位置环 P</td><td>1 kHz（cnt_i ≥ 20）</td><td class="mono">kp = 50.2654824574，w_max = 120.0 rad/s</td></tr>
+<tr><td>速度环 PI</td><td>2 kHz（cnt ≥ 10）</td><td class="mono">kp = 0.0729227202682，ki·Ts = 10.1906891515 × 0.0005，i_max = 9.0 A</td></tr>
+<tr><td>电流环 PI</td><td>20 kHz（每拍）</td><td class="mono">kp = 0.713141532365，ki = 2378.18563877，Ts = 5.0E-5，L = 0.0001135，ψ = 0.00759297995988</td></tr>
+<tr><td>SVPWM</td><td>每拍</td><td class="mono">1/√3 = 0.57735026918962584，电压限幅 = 0.54848275573 × vbus，d 轴优先 0.98</td></tr>
+<tr><td>角度链</td><td>每拍</td><td class="mono">p = 14，π/2 = 1.57079632679，延时补偿系数 0.00105 = 14 × 1.5 × 50 µs</td></tr>
+</table>
+<div class="note">参数来自 <code>three_loop_params.m</code>，在 build 时固化为字面量（<code>InlineParams=on</code>）。
+若电机参数或 Kt/PN 解释改变，必须改参数文件后重新 <code>generate_three_loop_code</code>，不要直接改 C 常量。</div>
+</div>
+
+<h2>4. 验证结果（逐项可复核）</h2>
+<div class="card">
+<table>
+<tr><th>验证项</th><th>方法 / 证据</th><th>结果</th></tr>
+<tr><td>源模型闭环正确性</td><td>工作区 <code>three_loop_pmsm/results/verify_report.txt</code>，19 项裁定</td><td><span class="tag t-good">19/19 PASS</span></td></tr>
+<tr><td>代码生成成功</td><td><code>slbuild</code> → <code>three_loop_deploy_ert_rtw/</code>，主文件 320 行 .c / 100 行 .h</td><td><span class="tag t-good">PASS</span></td></tr>
+<tr><td>接口完整性</td><td>头文件检索：initialize / step / ExtU / ExtY；输入字段 8/8、输出字段 5/5</td><td><span class="tag t-good">PASS</span></td></tr>
+<tr><td>生成边界干净</td><td>检索生成 .c 不含 <code>powergui|PMSM|ControlledVoltage</code> 等依赖</td><td><span class="tag t-good">PASS</span></td></tr>
+<tr><td>host 编译</td><td>MinGW GCC <code>-std=c99 -O2 -Wall</code>，无错误无警告</td><td><span class="tag t-good">PASS</span></td></tr>
+<tr><td>数值一致性 SIL</td><td>3000 拍逐拍比对 duty，<code>max|duty_C − duty_Simulink| = 6.20e-12</code></td><td><span class="tag t-good">PASS</span></td></tr>
+<tr><td>三环执行频率</td><td>SIL 末拍 <code>ticks = 3000 / 300 / 150</code>（0.15 s @ 20 kHz = 1 kHz 位置环）</td><td><span class="tag t-good">PASS</span></td></tr>
+<tr><td>符号与内存</td><td><code>nm -S</code>：<code>step</code> T 0x940 B（host x64 参考）、<code>initialize</code> T 0x10 B、<code>U</code> 0x40、<code>Y</code> 0x48、<code>DW</code> 0x60 B</td><td><span class="tag t-good">PASS</span></td></tr>
+<tr><td>ARM 目标编译</td><td>本机无 <code>arm-none-eabi-gcc</code>，未做目标编译 / 实机周期测量</td><td><span class="tag t-warn">未覆盖</span></td></tr>
+</table>
+</div>
+
+<h2>5. 集成到 FM_Servo_V3 / X72_FOC 工程</h2>
+<div class="card">
+<ol>
+<li>把 6 个生成文件（<code>three_loop_deploy.c/.h</code>、<code>three_loop_deploy_private.h</code>、<code>three_loop_deploy_types.h</code>、<code>rtwtypes.h</code>、<code>rtmodel.h</code>）加入 Keil MDK-ARM 工程（<code>..\embedded_project\STM32G474_App\MDK-ARM</code>）并加入 Include Path；只有 <code>three_loop_deploy.c</code> 一个 C 文件。<strong>不要</strong>加入 <code>sil_test.c</code>（含 main）与 <code>ert_main.c</code>（示例 main）。</li>
+<li>上电调用 <code>three_loop_deploy_initialize()</code>；TIM1 中心对齐 20 kHz（<code>PSC=0, ARR=4249</code> @170 MHz，以 <code>X72_FOC.ioc</code> 为准），ADC 由 <code>TIM1_TRGO</code> 触发。</li>
+<li>按 <code>integration_example.c</code> 实现 <code>BSP_ADC_*</code>、<code>BSP_MT6835_ReadRaw21()</code>、<code>BSP_TIM1_SetDuty()</code>：
+电流 <code>I = (ADC_V − 1.65)/0.03</code>（约 0.0269 A/LSB），角度 <code>2π·code/2^21</code>，速度差分 50 µs + 低通。</li>
+<li><strong>标定编码器零点偏置</strong>：控制器内部固定 +π/2 对齐；<code>VBUS_DIV</code> 按 VM 分压电阻实际比值填写（示例暂置 1.0，TODO）。</li>
+<li><code>pos_ref</code> 为机械角 rad；21 bit 单圈编码器若跨多圈，需在 BSP 侧累积圈数并保持与 <code>theta_m</code> 同坐标系。</li>
+<li>过流/过压/编码器异常时拉低 <code>en</code> 并封锁 PWM；用 <code>Y.ticks</code> 与 <code>Y.iq_ref</code> 做在线诊断。</li>
+</ol>
+<div class="note">编译选项：Keil AC6 <code>--cpu Cortex-M4.fp.sp</code> + C99 + O2；或 arm-none-eabi-gcc
+<code>-mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -O2 -std=c99</code>。</div>
+</div>
+
+<h2>6. 局限与待办（按优先级）</h2>
+<div class="card">
+<div class="warnbox"><strong>① 数据类型仍是 double（最重要的性能待办）</strong>：ERT 默认 <code>real_T = double</code>，
+而 Cortex-M4F 的 FPU 只支持单精度，<code>sin/cos/sqrt</code> 双精度会走软件库。20 kHz ISR 在 170 MHz 下约 8500 个周期，
+实机请先用 <code>DWT-&gt;CYCCNT</code> 实测 <code>step()</code> 周期数再决定是否上电运行。
+若超限，把三个 chart 的 persistent/输出初值改为 <code>single(0)</code>、Inport 与 Constant 设
+<code>OutDataTypeStr='single'</code> 后重新 codegen，生成代码即变为 <code>real32_T</code> + <code>sinf/cosf</code>。</div>
+<ul>
+<li>② 未做 ARM 目标编译、链接与实机 DWT 周期测量（本机无交叉编译器）；host SIL 只证明语法与数值逻辑。</li>
+<li>③ 两个宏语义待确认：<code>PMSM_PN=14</code> 按极对数、<code>Kt=225.5 mN·m/A</code> 按每 RMS 相电流；改动需重新生成代码。</li>
+<li>④ 未建模死区、管压降、母线纹波、ADC/编码器量化、齿槽转矩、弱磁与轨迹规划；<code>Y.duty</code> 未做死区补偿。</li>
+<li>⑤ 48 V / 2000 rpm 电压校核是解析边界（额定点需求 23.87 V / 上限 26.33 V），部署代码未实现弱磁；满速区需额外验证。</li>
+<li>⑥ <code>integration_example.c</code> 是接线模板，BSP 函数与故障保护需按现有固件补齐；<code>VBUS_DIV</code> 为 TODO。</li>
+</ul>
+</div>
+
+<h2>7. 文件与复现</h2>
+<div class="card">
+<table>
+<tr><th>文件</th><th>作用</th></tr>
+<tr><td class="mono">three_loop_deploy.c/.h、*_private.h、*_types.h、rtwtypes.h、rtmodel.h</td><td>可直接加入 MDK 工程的核心源码</td></tr>
+<tr><td class="mono">three_loop_deploy.slx、build_three_loop_deploy.m、generate_three_loop_code.m、fcn_*_deploy.m</td><td>部署模型、构建/生成脚本、三环控制律源码</td></tr>
+<tr><td class="mono">integration_example.c</td><td>TIM1 ISR 接线模板（含 ADC/编码器/PWM 标定）</td></tr>
+<tr><td class="mono">sil_test.c、sil_input.csv、sil_expected.csv</td><td>host SIL 数值比对程序与 3000 拍数据</td></tr>
+<tr><td class="mono">model_io_check.txt、README.md、代码生成报告.html</td><td>接口核验、集成说明、本报告</td></tr>
+<tr><td class="mono">three_loop_deploy_ert_rtw/</td><td>ERT 完整生成包（含 HTML codegen report、buildInfo）</td></tr>
+</table>
+<pre>set TMP=&lt;可写目录&gt;\tmp
+set TEMP=%TMP%
+set TMPDIR=%TMP%
+:: host SIL 复核
+gcc -std=c99 -O2 -Wall -I. sil_test.c three_loop_deploy.c -o sil_test.exe -lm
+sil_test.exe
+:: 重新生成
+matlab -sd "&lt;本目录&gt;" -batch "generate_three_loop_code"</pre>
+<div class="note">本机 <code>C:\Windows\TEMP</code> 在沙箱下不可写，MATLAB Simulink 启动和 MinGW GCC 编译都需要把
+TMP/TEMP/TMPDIR 重定向到工程内可写目录；这是环境限制，与生成代码无关。</div>
+</div>
+
+<div class="sub" style="margin-top:28px">结论状态：<span class="tag t-good">GO</span> 生成代码可进入固件集成与 host/目标验证；
+<span class="tag t-warn">上电前必做</span> 单精度 FPU 性能评估（DWT 周期数）、编码器零点标定、VBUS 分压系数；
+<span class="tag t-warn">未覆盖</span> ARM 目标编译、满速弱磁、死区补偿。</div>
+
+</div>
+</body>
+</html>

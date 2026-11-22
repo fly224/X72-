@@ -1,0 +1,5 @@
+﻿tag,t_mot,n,vqint_V,vqint_sd_V,ktc,rpm,iq,fault,line
+cold,29.21,0,0.289,0.0,1.0,,,0x00,external baseline
+hot1,80.15,1024,0.3742,1.2737,0.9,1982.9,2.422,0x00,[CMD] st en=1 moe=1 cal=1 z=1 dm=2000 bias=1.65/1.61 i=-1.11/2.24 f=0x00 cur=1 spd=1 fl=1 h=0 idq=-0.42/-2.20 tau=-0.174 g=1.00/1.00 clamp=0 ovc=-3.69/4.98 raw=1905/2182 v=31.07 led=1 ktc=0.9
+hot2,82.49,1024,0.3241,1.29,0.93,1958.9,1.799,0x00,[CMD] st en=1 moe=1 cal=1 z=1 dm=2000 bias=1.65/1.61 i=0.20/-0.23 f=0x00 cur=1 spd=1 fl=1 h=0 idq=0.05/-0.25 tau=-0.040 g=1.00/1.00 clamp=0 ovc=-3.69/4.98 raw=1905/2182 v=30.90 led=1 ktc=0.93�
+hot3,80.8,1024,0.3339,1.2847,0.937,2015.7,0.749,0x00,[CMD] st en=1 moe=1 cal=1 z=1 dm=2000 bias=1.65/1.61 i=-2.99/1.54 f=0x00 cur=1 spd=1 fl=1 h=0 idq=0.60/2.93 tau=0.237 g=1.00/1.00 clamp=0 ovc=-3.69/4.98 raw=1905/2182 v=31.27 led=1 ktc=0.937 

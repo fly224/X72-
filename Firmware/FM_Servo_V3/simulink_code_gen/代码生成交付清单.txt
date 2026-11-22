@@ -1,0 +1,85 @@
+﻿STM32G474 三环 FOC · ERT C 代码生成交付清单
+生成时间: 2026-11-15 20:38 (GMT+8)
+生成命令: matlab.exe -sd "G:\FOC\X72\Firmware\FM_Servo_V3\simulink_code_gen" -batch "generate_three_loop_code"
+工具链  : MATLAB R2023b / Simulink Coder 23.2, ert.tlc, ARM Compatible->ARM Cortex-M
+参数源  : ..\three_loop_params.m  (Ts_i=50e-6 / Ts_w=500e-6 / Ts_p=1e-3)
+注意    : 本机 C:\Windows\TEMP 不可写，运行前须把 TMP/TEMP/TMPDIR/MATLAB_PREFDIR
+          重定向到工程内可写目录，否则 Simulink 启动即失败。
+
+==========================================================================
+一、生成边界
+==========================================================================
+进入 MCU : 位置环 / 速度环 / 电流环控制律 + SVPWM + 电压圆限幅 + 角度变换
+不进 MCU : SPS PMSM 电机、受控电压源、平均逆变器、powergui、激励与 Scope（被控对象）
+模型     : three_loop_deploy.slx，11 Inport -> ThreeLoop_Controller 原子子系统 -> 5 Outport
+代码生成 : Nonreusable function / InlineParams / GenCodeOnly；参数以 Inport 对外可调
+
+==========================================================================
+二、交付文件（根目录平铺，加入 Keil/CubeIDE 工程只需这 6 个）
+==========================================================================
+文件                              字节   SHA256
+three_loop_deploy.c              11249  0442975135061009a3fbf3e02cfd989941007fb8cf6941b0b0f2616eb9af8a67
+three_loop_deploy.h               4231  291ff819962a48a9134746e294a1caf6700cbcd7f07ceb0c24df75023e3eee68
+three_loop_deploy_private.h         756  d2caa1e82f27505e025b42fbd7a4cff1a1243e17cb740a360fc6ce673561b3e6
+three_loop_deploy_types.h           689  fe09c069e318b27d080a724c7dea5a493db8f2fbef11450d11448cbfca9b5dee
+rtwtypes.h                        3570  65a62a0a4af0bfdfe29e4ea640dee6c9bb316ea4eb9c0a73dc6699493bb18443
+rtmodel.h                          980  2f343bf49bb29854b0fe5ca44a4863f1a6263c8225505f625787096b55eb7542
+
+根目录 6 个文件与 three_loop_deploy_ert_rtw/ 内同名文件 SHA256 完全一致。
+ert_main.c 已排除（含示例 main，会与固件 main 冲突）。
+另有手写适配层 three_loop_tuning.c/.h（参数接口，必须一起加入工程），
+以及 sil_test.c / tuning_test.c / integration_example.c（不加入固件工程）。
+
+==========================================================================
+三、接口与时序（生成代码实测）
+==========================================================================
+数据类型 : real32_T (float)，数学函数 sinf / cosf / sqrtf
+           three_loop_deploy.h:41  real32_T ia;
+           three_loop_deploy.c:118 sinf / :119 cosf / :186 sqrtf
+输入 U   : ia,ib,ic,vbus,theta_m,omega_m,pos_ref,en,par_c[11],par_w[5],par_p[4]
+输出 Y   : duty[3],iq_ref,w_ref,iq_used,ticks[3]
+静态 RAM : U=0x80(128B) Y=0x28(40B) DW=0x40(64B) = 232 B
+           step 符号 0x8e0 B（host x64 -O2 参考值，非 ARM 目标）
+时序     : step() @ 50 us = 20 kHz；速度环 /10 = 2 kHz；位置环 /20 = 1 kHz
+角度     : three_loop_deploy.c:51
+           theta_e = 14*theta_m + 1.57079637F + 0.00105F*omega_m
+           gain_comp = p*1.5*Ts_i = 14*1.5*50us = 0.00105
+入口     : three_loop_deploy_initialize() / three_loop_deploy_step()
+参数写入 : ThreeLoop_Tuning_Init() 后由上位机经 ThreeLoop_ParamSet(id,raw,is_enabled) 修改，
+           ISR 内只写 8 个信号字段，禁止写 U.par_*
+
+==========================================================================
+四、本轮验证（全部实测，非声明）
+==========================================================================
+[PASS] patch_gen_code.py --check : 4/4 模型侧已修正（dt=5e-5 / N_w=10 / N_p=20 / gain_comp=0.00105）
+[PASS] 接口核验 model_io_check.txt : 11/11 输入、5/5 输出、无 SPS 依赖、参数可调、real32_T、sinf/cosf/sqrtf
+[PASS] host 编译 MinGW GCC -std=c99 -O2 -Wall : sil_test / tuning_test 均 0 error 0 warning
+[PASS] SIL 数值一致性 : 3000 拍 max|duty_C - duty_Simulink| = 1.788141e-007（float 精度量级）
+                        last ticks = 3000 / 300 / 150（20:2:1）
+[PASS] 参数接口自检 tuning_test : 14/14 PASS（默认值/定点/只读/使能拒写/越界/跨 2pi wrap/固定项保护）
+[PASS] integration_example.c 语法检查 gcc -fsyntax-only : 0 error 0 warning
+[PASS] 手写适配层无 fabs/sqrt/sin 双精度数学残留
+[PASS] 根目录与 ert_rtw 主源码 SHA256 一致
+
+==========================================================================
+五、本轮相对上一版的两处收口修正
+==========================================================================
+1) build_three_loop_deploy.m : gain_comp 的 Gain 参数改用 single 可精确表示的
+   sprintf('%.17g', single(...))，消除 Simulink "Parameter precision loss" 量化诊断。
+   single 下数值与原 0.00105 完全相同，生成 C 文本未变化（哈希一致）。
+2) integration_example.c:140 : BSP_TIM1_SetDuty(...) 缺右括号导致语法错误（此前从未参与
+   host 编译故未暴露），已补齐；:145 fabs -> fabsf 避免 float 被提升为 double。
+3) generate_three_loop_code.m : 末尾加 bdclose 强制丢弃 SIL 仿真造成的 dirty 状态，
+   避免 MATLAB 退出时报"无法关闭模型"；不保存 SIL 配置到部署模型。
+
+==========================================================================
+六、局限 / 上线前必做
+==========================================================================
+* 未做 ARM 目标编译/链接，未做实机 DWT->CYCCNT 单拍周期测量。
+  烧录前必须确认 step() < 50 us（8500 cyc @170MHz）；历史 single 版参考 1813 cyc。
+* 若实机仍按 10 kHz 触发，必须把 three_loop_params.m 的 Ts_i 改回 100e-6 重新生成，
+  否则 dt/N_w/N_p/gain_comp 会全部失配。
+* VBUS_DIV 为 TODO；编码器零点需标定；21bit 单圈跨多圈需在 BSP 侧累积圈数。
+* 未建模死区、弱磁、ADC/编码器量化；位置模式限 ±π。
+* 闭环 MIL 仿真（sim_check/）仍用 double 控制器以便与历史结果同口径对比；
+  生成代码等价性由本轮 host SIL 1.79e-7 保证。

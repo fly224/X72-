@@ -1,0 +1,33 @@
+﻿STM32G474 ERT 代码生成核验（2026-11-15 20:38:01）
+模型: three_loop_deploy.slx | 目标: ert.tlc / ARM Compatible->ARM Cortex-M
+生成目录: G:\FOC\X72\Firmware\FM_Servo_V3\simulink_code_gen\three_loop_deploy_ert_rtw
+--------------------------------------------------------------
+[PASS] three_loop_deploy_initialize 声明
+[PASS] three_loop_deploy_step 声明
+[PASS] ExtU_three_loop_deploy_T / ExtY_three_loop_deploy_T 结构体
+[PASS] 输入字段 U.ia
+[PASS] 输入字段 U.ib
+[PASS] 输入字段 U.ic
+[PASS] 输入字段 U.vbus
+[PASS] 输入字段 U.theta_m
+[PASS] 输入字段 U.omega_m
+[PASS] 输入字段 U.pos_ref
+[PASS] 输入字段 U.en
+[PASS] 输入字段 U.par_c
+[PASS] 输入字段 U.par_w
+[PASS] 输入字段 U.par_p
+[PASS] 输出字段 Y.duty
+[PASS] 输出字段 Y.iq_ref
+[PASS] 输出字段 Y.w_ref
+[PASS] 输出字段 Y.iq_used
+[PASS] 输出字段 Y.ticks
+[PASS] 生成代码不含 SPS 被控对象依赖
+[PASS] PID 参数以 Inport 对外可调 (U.par_c/par_w/par_p)
+[PASS] 生成 C 中已无固定 PID 字面量
+[PASS] 接口为单精度 real32_T（非 double）
+[PASS] 生成代码使用 sinf/cosf/sqrtf（M4F 硬件 FPU）
+--------------------------------------------------------------
+主代码行数: three_loop_deploy.c = 343, three_loop_deploy.h = 103；平铺 .c/.h = 6 个
+时序: step() @ 50 us (20000 Hz)；位置环 /20 -> 1000 Hz；速度环 /10 -> 2000 Hz
+角度: theta_e = p*theta_m + pi/2 + omega_e*1.5*Ts_i, p=14, gain_comp=0.00105
+数据类型: 单精度 real32_T（float）；M4F 硬件 FPU 可直接执行，实机单拍预算需 DWT 复测
