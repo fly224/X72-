@@ -1160,8 +1160,17 @@ typedef struct {
 
 static const SpdSchedPt s_sched[SPD_SCHED_N] = {
     /*  w[rad/s]   rpm      kp      kits      依据 */
-    {   0.00f,             0.250f, 0.0300f },  /* 0：静止保持，略降防抖 */
-    {   0.21f,   /*   2 */ 0.550f, 0.0400f },  /* 进入爬行立刻拉回最优 */
+    /* 2026-11-23 改：零速档位 0.250 → 0.583（与 100 rpm 同档）。
+     *
+     * 原来写 0.250 是"静止保持略降防抖"，但那个抖动源其实是**摩擦前馈**
+     * 在 w≈0 处的 tanh 跳变（已在同一天用 SERVO_FF_FRIC_FADE_W 修掉）。
+     * 压低 kp 反而制造了新问题：0.25 对应速度环带宽只有 66 Hz
+     * （0.25×Kt0.091/J5.47e-5），而位置环 Kp=100 与它组合后在这附近
+     * 形成 75~85 Hz 极限环 —— 实测 p_now 峰峰 659 mrad（电机持续绕圈）、
+     * 偏目标 +17.8 mrad。提到 0.583 后（带宽 154 Hz）同一工况
+     * p_now 峰峰降到 0.67 mrad、偏目标 +0.001 mrad，位置刚度不变。 */
+    {   0.00f,             0.583f, 0.0408f },  /* 0：静止保持，与 100 rpm 同档 */
+    {   0.21f,   /*   2 */ 0.583f, 0.0408f },  /* 进入爬行保持同档 */
     {  10.47f,   /* 100 */ 0.583f, 0.0408f },  /* 实测最优（154 Hz） */
     {  52.36f,   /* 500 */ 0.583f, 0.0408f },  /* 平坦段 */
     /* 高速段：**降 Kp 但保 Ki**。
@@ -1256,6 +1265,18 @@ void Servo_GetSchedGains(float *kp, float *kits)
                                           * 原 2.14e-4 比实测小一个数量级，
                                           * 1000rpm 处少补约 0.3A，全靠积分项扛 */   /* A/(rad/s)：Bv/Kt，30 rpm 时才 0.0007 A，几乎可忽略 */
 #define SERVO_FF_W_EPS      (0.05f)      /* rad/s：摩擦过渡宽度，越大换向越软 */
+/* 摩擦前馈低速淡出宽度（2026-11-23）。
+ *
+ * 为什么必须加：位置保持时位置环输出的 v_cmd 在 0 附近抖 ±0.1 rad/s，
+ * 而 tanh(w / 0.05) 早已饱和在 ±1，于是前馈在 ±0.107 A 之间来回跳变 ——
+ * 实测这一项单独造成 75~80 Hz、0.229 A 的 iq 脉动（就是"静止嗡嗡声"），
+ * 关掉 ff_fric 后该分量降到 0.034 A（−85%），RMS 0.272 → 0.102 A。
+ * 摩擦补偿本来就是给"运动中"用的，静止不需要，所以按 |w_ref| 线性淡出：
+ *   |w| ≥ 1.0 rad/s（≈9.5 rpm）→ 全量
+ *   |w| = 0                    → 0
+ * 取 1.0 而不是更小：静摩擦在起动段才关键，而 9.5 rpm 以上已完全恢复全量，
+ * 不影响低速爬行；再往上调会削弱 5~10 rpm 的摩擦补偿。 */
+#define SERVO_FF_FRIC_FADE_W (1.0f)      /* rad/s */
 #define SERVO_FF_ACC_LPF    (0.25f)      /* 加速度前馈一阶系数（2 kHz → tau≈2 ms） */
 /* 起动助推倍数：静摩擦约是动摩擦的 2 倍（实测起动 0.64 A vs 稳态 0.30 A）。
  * 标定只能测到**稳态** iq（= 动摩擦），所以起动瞬间要额外加一份。
@@ -2184,17 +2205,29 @@ static float Servo_SpeedLoopStep(float w_ref, float w_meas)
             s_ff_acc_f += SERVO_FF_ACC_LPF * (acc_ref - s_ff_acc_f);
 
             if (s_ff_en != 0U) {
+                const float w_r  = s_spd_ref_ramp;
+                const float aw   = fabsf(w_r);
+                /* 摩擦前馈低速淡出（2026-11-23）：静止保持时 w_ref 在 0 附近
+                 * 抖 ±0.1 rad/s，tanh 早已饱和，前馈就会在 ±0.107 A 之间跳变，
+                 * 形成 75~80 Hz 正反馈极限环（= 静止嗡嗡声）。
+                 * 见 SERVO_FF_FRIC_FADE_W 的说明。 */
+                const float fade = (aw < SERVO_FF_FRIC_FADE_W)
+                                 ? (aw / SERVO_FF_FRIC_FADE_W) : 1.0f;
+                const float fric = s_ff_fric * tanhf(w_r / SERVO_FF_W_EPS) * fade;
+
                 ff += s_ff_acc * s_ff_acc_f;
-                ff += s_ff_fric * tanhf(s_spd_ref_ramp / SERVO_FF_W_EPS);
-                ff += s_ff_visc * s_spd_ref_ramp;
+                ff += fric;
+                ff += s_ff_visc * w_r;
 
                 /* 起动助推：实测转速还不到给定 30% 时，额外补一份摩擦前馈。
                  * 静摩擦是动摩擦的 2 倍，只补动摩擦的话起动仍靠积分爬，
                  * 爬的过程就是实测 68.8% 超调的来源（仿真确认：只加摩擦前馈
                  * 超调 68.5% 不变，加助推后降到 27.7%）。
-                 * 稳态时 w_meas ≈ w_ramp，判据自然失效，不会过补偿。 */
-                if (fabsf(w_meas) < (SERVO_FF_START_RATIO * fabsf(s_spd_ref_ramp))) {
-                    ff += s_ff_fric * s_ff_boost * tanhf(s_spd_ref_ramp / SERVO_FF_W_EPS);
+                 * 稳态时 w_meas ≈ w_ramp，判据自然失效，不会过补偿。
+                 * 必须同样乘 fade：否则静止时给定抖到 0.1 rad/s 也会触发助推，
+                 * 前馈跳变幅度翻倍。 */
+                if (fabsf(w_meas) < (SERVO_FF_START_RATIO * aw)) {
+                    ff += s_ff_fric * s_ff_boost * tanhf(w_r / SERVO_FF_W_EPS) * fade;
                 }
             }
             s_ff_last = ff;
