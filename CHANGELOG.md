@@ -12,6 +12,13 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **母线保护阈值改为 OV 60 V / UV 30 V**（`bsp_servo.h`，原 58 V / 18 V）。
+  48 V 标称的 1.25 倍 / 62.5%，对应 100 V MOS 与 63 V 母线电容。
+  注意：台架若仍是 30.8 V 供电，UV 只剩 0.8 V 余量，带载加减速易误报 `0x0080`；
+  空载 200 rpm 急加急减实测母线 30.73~30.77 V、无故障（`Agnet/vbus_stress.py`）
+
 ### 修复
 
 - **CAN L1 失效安全误 Disarm**（`can_proto.c`）。`s_cmd_age` 初始 `0xFFFF`（从未收到
