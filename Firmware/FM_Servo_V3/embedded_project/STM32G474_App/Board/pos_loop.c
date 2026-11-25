@@ -355,11 +355,12 @@ void PosLoop_SetKp(float kp)
 
 void PosLoop_SetLimits(float vmax, float amax, float jmax)
 {
-    if (vmax < 0.5f)    { vmax = 0.5f; }
-    if (vmax > 120.0f)  { vmax = 120.0f; }
-    if (amax < 10.0f)   { amax = 10.0f; }
-    if (amax > 5000.0f) { amax = 5000.0f; }
-    if (jmax < 100.0f)  { jmax = 100.0f; }
+    /* 2026-11-24 位置环改输出端口径：限幅边界同步 ÷减速比 9。 */
+    if (vmax < 0.056f)  { vmax = 0.056f; }
+    if (vmax > 13.33f)  { vmax = 13.33f; }
+    if (amax < 1.11f)   { amax = 1.11f; }
+    if (amax > 555.0f)  { amax = 555.0f; }
+    if (jmax < 11.1f)   { jmax = 11.1f; }
 
     s_vmax = vmax;
     s_amax = amax;
@@ -376,8 +377,9 @@ void PosLoop_SetLimits(float vmax, float amax, float jmax)
 
 void PosLoop_SetErrMax(float e)
 {
-    if (e < 0.1f)  { e = 0.1f; }
-    if (e > 50.0f) { e = 50.0f; }
+    /* 2026-11-24 输出端口径：原 0.1~50 rad 是电机端，÷9 ≈ 0.011~5.56。 */
+    if (e < 0.011f) { e = 0.011f; }
+    if (e > 5.56f)  { e = 5.56f; }
     s_errmax = e;
 
     /* errmax 改小会把 Kp 下限抬上去（同 SetLimits 的理由） */

@@ -1390,13 +1390,14 @@ uint8_t Servo_IsSpeedMode(void) { return s_spd_en; }
  * 否则编译器可能把它提升到循环外，表现为"切了模式但坐标没变"。 */
 static volatile float s_pos_base;
 
-/* 位置环坐标（编码器方向，进入时 = 单圈角，之后连续） */
+/* 位置环坐标（输出端，编码器方向；进入时 = 单圈角，之后连续）。
+ * 2026-11-24 改输出端口径：theta_multi 是电机端多圈角，÷减速比 9 得输出端。 */
 static float pos_coord_now(void)
 {
 #if (SERVO_POS_COORD_AT_ENTRY != 0)
-    return BspServo_GetThetaMulti() - s_pos_base;
+    return (BspServo_GetThetaMulti() - s_pos_base) / ACT_GEAR_RATIO;
 #else
-    return BspServo_GetThetaMulti();
+    return BspServo_GetThetaMulti() / ACT_GEAR_RATIO;
 #endif
 }
 
@@ -1452,15 +1453,18 @@ static float pos_coord_align(void)
      * 反向走 4 圈，一路冲到跟随误差超限（0x0100）。
      *
      * fmodf 只依赖一个量，天然同拍，结果必然落在 [0, 2π)，
-     * 且丢掉关中断读第二个量的窗口（更短、更安全）。 */
-    frac = fmodf(m, BSP_TWO_PI);
-    if (frac < 0.0f) { frac += BSP_TWO_PI; }
+     * 且丢掉关中断读第二个量的窗口（更短、更安全）。
+     *
+     * 2026-11-24 位置环改输出端口径：这里对齐到**输出端圈**（9×2π 电机端），
+     * 于是 pos_coord_now() = (m - base)/9 落在输出端 [0, 2π)。 */
+    frac = fmodf(m, ACT_GEAR_RATIO * BSP_TWO_PI);
+    if (frac < 0.0f) { frac += ACT_GEAR_RATIO * BSP_TWO_PI; }
 
     s_pos_base = m - frac;
 
     /* 新坐标系：允许下一次下发重新折算圈基准 */
     s_pos_cmd_last = -1.0e9f;
-    s_pos_tgt_last = frac;
+    s_pos_tgt_last = frac / ACT_GEAR_RATIO;   /* 输出端单圈角 */
     return old;
 #else
     return 0.0f;
@@ -1587,11 +1591,12 @@ void Servo_SetPosTarget(float p_target_rad)
      * 原因见下方 roundf 的注释（重算会让 now 跨过 π 时跳一整圈）。
      *
      * 例外（2026-11-22 补）：位置环已 DONE、但实测被外力推离上次目标
-     * 50 mrad 以上时，必须允许重新定位 —— 否则"到位后被推开、再下发
-     * 同一个值"会被静默忽略，表现为指令没反应。 */
+     * 50 mrad（电机端）以上时，必须允许重新定位 —— 否则"到位后被推开、再下发
+     * 同一个值"会被静默忽略，表现为指令没反应。
+     * 2026-11-24 输出端：50 mrad ÷9 ≈ 5.6 mrad。 */
     if (fabsf(p_target_rad - s_pos_cmd_last) <= 1.0e-6f) {
         if (PosLoop_GetState() != POS_ST_DONE) { return; }
-        if (fabsf(pos_coord_now() - s_pos_tgt_last) < 0.05f) { return; }
+        if (fabsf(pos_coord_now() - s_pos_tgt_last) < 0.0056f) { return; }
     }
     s_pos_cmd_last = p_target_rad;
 
@@ -2002,9 +2007,10 @@ void Servo_GetSpeedState(float *w_ref, float *iq_cmd, float *i_term, uint32_t *e
  * 参数只存 RAM：落盘要动 ParamBlob 版本（会作废现有 C/Z 标定），
  * 等双页乒乓一起做。上电默认关闭。 */
 static volatile uint8_t s_nf_en;
-static volatile float   s_nf_f0     = 150.0f;   /* Hz */
-static volatile float   s_nf_depth  = 12.0f;    /* dB */
-static volatile float   s_nf_q      = 2.0f;
+static volatile float   s_nf_f0     = 104.0f;   /* Hz（2026-11-24 三环调参：150→104，压 1560rpm 4次/转） */
+static volatile float   s_nf_depth  = 40.0f;    /* dB（12→40，最优） */
+static volatile float   s_nf_q      = 10.0f;    /* 2→10，窄带 */
+static volatile uint8_t s_nf_track;             /* 阶次跟踪：0=固定 f0，k=跟随 k 次/转 */
 static float s_nf_b0, s_nf_b1, s_nf_b2, s_nf_a1, s_nf_a2;
 static float s_nf_x1, s_nf_x2, s_nf_y1, s_nf_y2;
 
@@ -2023,27 +2029,34 @@ static void notch_recalc(void)
     {
         const float w0 = 6.28318531f * f0 / fs;
         const float cw = cosf(w0);
-        const float al = sinf(w0) / (2.0f * q);
-        const float a0 = 1.0f + al;
+        const float al = sinf(w0) / (2.0f * q);        /* 决定陷波带宽 */
+        const float rp = 1.0f - al;                     /* 极点半径 */
+        const float k  = 1.0f - powf(10.0f, -dep / 20.0f);
+        const float rz = rp + (1.0f - rp) * k;          /* 零点半径：dep=0→rp(直通) */
 
-        /* 归一化（a0 = 1）的完整陷波 */
-        const float b0n = 1.0f / a0;
-        const float b1n = -2.0f * cw / a0;
-        const float b2n = 1.0f / a0;
-        const float a1n = -2.0f * cw / a0;
-        const float a2n = (1.0f - al) / a0;
+        /* 2026-11-23 修 DC 增益 bug。
+         * 旧实现只在分子上做深度混合：H = ((1-k) + k·B)/A，dep=20 dB 时
+         * DC 增益 1.86（应≈1）。后果：一开陷波速度反馈整体放大 1.86 倍，
+         * 速度环等效增益翻倍 → 超速保护停机（实测开陷波后 rpm 掉 0）。
+         * 新做法：零/极点半径随深度一起拉开，再用 g 归一化到 DC 增益 = 1，
+         * dep=0 时 rz=rp → 严格直通。陷波深度 20·log10((1-rz)/(1-rp)) = -dep dB。 */
+        const float b0 = 1.0f;
+        const float b1 = -2.0f * rz * cw;
+        const float b2 = rz * rz;
+        const float a1 = -2.0f * rp * cw;
+        const float a2 = rp * rp;
+        const float g  = (1.0f + a1 + a2) / (b0 + b1 + b2);
 
-        /* 深度混合：k=0 直通，k=1 完整陷波 */
-        const float k = 1.0f - powf(10.0f, -dep / 20.0f);
-
-        s_nf_b0 = (1.0f - k) + k * b0n;
-        s_nf_b1 = k * b1n;
-        s_nf_b2 = k * b2n;
-        s_nf_a1 = a1n;
-        s_nf_a2 = a2n;
+        s_nf_b0 = b0 * g;
+        s_nf_b1 = b1 * g;
+        s_nf_b2 = b2 * g;
+        s_nf_a1 = a1;
+        s_nf_a2 = a2;
     }
-
-    s_nf_x1 = s_nf_x2 = s_nf_y1 = s_nf_y2 = 0.0f;     /* 改参数必须清状态 */
+    /* 注意：这里**不清** x/y 状态。阶次跟踪时 f0 随转速变化会频繁重算，
+     * 每次清状态等于让滤波器反复从 0 起步，反馈出现周期性台阶，
+     * 与速度环耦合成自激（实测 2000 rpm 漂到 2114）。手动配置（Servo_SetNotch）
+     * 才清状态，那里参数是跳变的、清状态才是正确语义。 */
 }
 
 void Servo_SetNotch(uint8_t en, float f0_hz, float depth_db, float q)
@@ -2063,6 +2076,7 @@ void Servo_SetNotch(uint8_t en, float f0_hz, float depth_db, float q)
     s_nf_depth = depth_db;
     s_nf_q     = q;
     notch_recalc();
+    s_nf_x1 = s_nf_x2 = s_nf_y1 = s_nf_y2 = 0.0f;   /* 手动改参数：清状态 */
     s_nf_en    = (en != 0U) ? 1U : 0U;
 }
 
@@ -2072,6 +2086,35 @@ void Servo_GetNotch(uint8_t *en, float *f0_hz, float *depth_db, float *q)
     if (f0_hz)    { *f0_hz    = s_nf_f0; }
     if (depth_db) { *depth_db = s_nf_depth; }
     if (q)        { *q        = s_nf_q; }
+}
+
+/* 阶次跟踪（自适应陷波，2026-11-23）。
+ * s_nf_track = k（>0）时，f0 跟随 |w_meas|·k/(2π)，即 k 次/转。
+ * 用于覆盖"编码器 4 次/转误差"这类随转速移动的激励：固定 f0 只压一个转速点，
+ * 跟踪后全转速都压在该阶次上。固定 f0（30096 pl[4]）在跟踪态被忽略。 */
+void Servo_SetNotchOrder(uint8_t order)
+{
+    s_nf_track = order;
+}
+
+uint8_t Servo_GetNotchOrder(void)
+{
+    return s_nf_track;
+}
+
+static void notch_track(void)
+{
+    float f0;
+
+    if (s_nf_track == 0U) { return; }
+    /* 用斜坡后的给定 s_spd_ref_ramp（平滑、无测量噪声）算跟踪频率。
+     * 之前用 w_meas：它自带 4 次/转 ±7 rpm 噪声，让 f0 抖动、反复触发
+     * 重算 + 清状态，与速度环耦合成自激（实测全转速 +4~6% 漂移、rms 翻倍）。 */
+    f0 = (float)s_nf_track * fabsf(s_spd_ref_ramp) / 6.283185307179586f;
+    if (fabsf(f0 - s_nf_f0) >= 1.0f) {
+        s_nf_f0 = f0;
+        notch_recalc();
+    }
 }
 
 static float notch_apply(float x)
@@ -2094,7 +2137,10 @@ static float Servo_SpeedLoopStep(float w_ref, float w_meas)
         s_spd_exec++;
 
         /* 陷波只作用在反馈上，且在 2 kHz 的环内节拍里跑（fs = 1/TS） */
-        if (s_nf_en != 0U) { w_meas = notch_apply(w_meas); }
+        if (s_nf_en != 0U) {
+            notch_track();                  /* 阶次跟踪先于滤波，刷新 f0 */
+            w_meas = notch_apply(w_meas);
+        }
 
         /* ---- ① 给定斜坡：阶跃 → 受 accel 限制的斜坡 ----
          * 首次进入用实测速度起步（不是 0），否则"加斜坡"只是把阶跃推迟一拍。
@@ -2816,11 +2862,13 @@ void Servo_ControlTick(void)
                      * （500 us）才与实际控制周期一致。每拍都算会让规划跑快
                      * 10 倍，定位时间对不上、末端过冲。 */
                     if (s_spd_cnt >= (SERVO_SPD_DIV - 1U)) {
-                        /* 用位置环坐标（= theta_multi − s_pos_base），不是裸的
-                         * theta_multi：进位置模式那一拍已对齐到单圈角，
+                        /* 用位置环坐标（输出端），不是裸的 theta_multi：
+                         * 进位置模式那一拍已对齐到输出端单圈角，
                          * 这样反馈值不会累积到上百 rad。
-                         * 这里只做一次 volatile 读 + 减法，20 kHz 下无压力。 */
-                        s_pos_vcmd = PosLoop_Step(ds * pos_coord_now(), om);
+                         * 这里只做一次 volatile 读 + 减法，20 kHz 下无压力。
+                         * 2026-11-24 改输出端口径：位置环内部用输出端，v_meas=om/9，
+                         * 输出的 v_cmd 也 ×9 转回电机端再进速度环。 */
+                        s_pos_vcmd = PosLoop_Step(ds * pos_coord_now(), om / ACT_GEAR_RATIO);
 
                         /* 跟随误差超限：位置环已停止给速度，这里落故障位。
                          * 放 ISR 而非 1 ms 任务，是为了检出与封锁同拍生效 ——
@@ -2829,8 +2877,9 @@ void Servo_ControlTick(void)
                             BspServo_RaiseFault(BSP_FAULT_FOLLOW);
                         }
                     }
-                    w_ref_model   = s_pos_vcmd;         /* 已是模型坐标系 */
-                    s_spd_ref_raw = ds * s_pos_vcmd;    /* 超速判据用绝对值，符号仅诊断 */
+                    /* s_pos_vcmd 是输出端速度给定，×9 转回电机端（模型坐标）进速度环。 */
+                    w_ref_model   = s_pos_vcmd * ACT_GEAR_RATIO;
+                    s_spd_ref_raw = ds * s_pos_vcmd * ACT_GEAR_RATIO;  /* 超速判据用电机端，符号仅诊断 */
                 } else {
                     /* 坐标系：om 已乘 dir_sign（模型坐标系），给定也必须换算过去，
                      * 否则 dir=-1 时正 iq 让 om 变小 -> 误差变大 -> 正反馈飞车。 */

@@ -448,6 +448,8 @@ void Telemetry_Task1ms(void)
         ServoPosDiag_t pd;
 
         Servo_GetPosDiag(&pd);
+        /* 2026-11-24 位置环已改输出端口径：所有位置/速度/误差字段都已是输出端，
+         * 不再需要 ÷ACT_GEAR_RATIO。kp 无量纲；vmax/errmax/i_term 现在也是输出端口径。 */
         put_f32(&p_ps[0],  pd.p_now);
         put_f32(&p_ps[4],  pd.p_tgt);
         put_f32(&p_ps[8],  pd.p_tgt_c);

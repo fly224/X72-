@@ -27,7 +27,10 @@ static float s_p_target    = 0.0f;   /* rad（编码器坐标系） */
 static float s_mit_p       = 0.0f;
 static float s_mit_v       = 0.0f;
 static float s_mit_kp      = 30.0f;  /* 与 mit_run.py 优化默认值一致 */
-static float s_mit_kd      = 0.05f;
+/* kd 默认 0.10（2026-11-24）：静止嗡嗡声是 MIT 闭环固有频率 ωn=√(kp/J)≈90Hz
+ * 的欠阻尼振荡（kd 扫描实测：0.02→0.10 时 90Hz 幅值 0.159→0.012 mrad，-92%）。
+ * 0.10 对应阻尼比 ζ≈0.94（临界阻尼），远低于 kd=0.5 起 244Hz 极限环的阈值。 */
+static float s_mit_kd      = 0.10f;
 static float s_mit_tau     = 0.0f;
 
 /* 给定就绪标志：控制字 bit0 由 0→1 时，按 s_op_mode 选最近一次显式下发过的
@@ -53,7 +56,7 @@ void AppParam_Init(void)
     s_mit_p = 0.0f;
     s_mit_v = 0.0f;
     s_mit_kp = 30.0f;
-    s_mit_kd = 0.05f;
+    s_mit_kd = 0.10f;   /* 与顶部默认值一致（2026-11-24 提阻尼消除静止嗡嗡声） */
     s_mit_tau = 0.0f;
     s_iq_valid = 0U;
     s_w_valid  = 0U;
@@ -319,6 +322,11 @@ AppParamStatus_t AppParam_SetSpeedAccel(float a_rad_s2)
         return APP_PARAM_OUT_OF_RANGE;
     }
     Servo_SetSpeedAccel(a_rad_s2);
+    /* A1/F1（长测 2026-11-23）：s_spd_t_ramp 非 0 时速度环走"时间优先"，绕过 s_spd_acc，
+     * 导致 30019 off32 写进来的加速度被静默忽略（界面无提示、回读还显示写入值）。
+     * 上位机的"到达时间"与"加速度"是互斥控件，这里显式设加速度 = 关掉时间优先，
+     * 同时 30097 回读也变成 t=0，界面立刻能看到状态变化。 */
+    Servo_SetSpeedTrajTime(0.0f);
     return APP_PARAM_SUCCESS;
 }
 

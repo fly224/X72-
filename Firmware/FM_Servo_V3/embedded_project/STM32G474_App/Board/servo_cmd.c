@@ -428,6 +428,19 @@ static void do_speed(float rpm)
  * ISR 的分支优先级是 fault > openloop > 电流(含速度) > 模型，
  * 所以从"低优先级态"发命令切"高优先级态"时，必须先把高优先级态关掉，
  * 否则命令看起来生效了（回显 OK），实际 ISR 还在跑旧环路。 */
+
+/* 位置环入口余速门禁（A13/F2，长测 2026-11-23）：
+ * 带余速切位置环时，位置环 v_max(POS_VMAX_DFLT=25 rad/s≈239 rpm) 没能力在单次
+ * 折算行程(≤π)内刹住，实测 800 rpm 余速切进来会单向多跑 4~6 圈并锁 0x0100 跟随误差，
+ * 且不报警、不拒绝、直接满速跑。这里在入口拒绝（留 10% 余量 ≈215 rpm），
+ * 与力矩模式的 CMD_CUR_WMAX_RADS 门禁同策略。用 |omega| 只关心幅值。 */
+#define CMD_POS_WMAX_RADS   (25.0f)   /* 电机端口径 v_max = 输出端 POS_VMAX_DFLT(2.78 rad/s) × 9 */
+static uint8_t pos_entry_blocked(void)
+{
+    const float w_now = fabsf(BspServo_GetOmegaMech());
+    return (w_now > (0.9f * CMD_POS_WMAX_RADS)) ? 1U : 0U;
+}
+
 static void do_pos(uint8_t hold, float rad)
 {
 
@@ -465,6 +478,12 @@ static void do_pos(uint8_t hold, float rad)
         /* 从速度/力矩模式切过来：必须先停原来那条链，否则 ISR 里
          * s_spd_en 优先，位置环看着"已使能"但完全不生效。 */
         do_disable("switch to POS");
+    }
+
+    /* A13/F2：带余速起位置环会多跑数圈并锁 0x0100。拒绝（电机保持滑行），
+     * 不置 s_armed，等用户停稳再切。已在环内改目标（上面的 early-return 分支）不受影响。 */
+    if (pos_entry_blocked() != 0U) {
+        return;
     }
 
     /* 进入顺序与 do_speed 一致：关模型三环 → 切模式 → 套增益 →
@@ -549,6 +568,11 @@ static uint8_t do_enable(void)
          * ——上位机看到"已使能"但电机不动。
          *
          * 正确做法：等它跑完，或发 halt（do_disable 会 Abort 全部辨识）。 */
+        return 0U;
+    }
+
+    /* A13/F2：带余速使能（起位置环）会多跑数圈并锁 0x0100。拒绝，等停稳再使能。 */
+    if (pos_entry_blocked() != 0U) {
         return 0U;
     }
 
@@ -1065,6 +1089,14 @@ static uint8_t mit_engage(float p, float v, float kp, float kd, float t)
     if (BspServo_IsCurrentCalibrated() == 0U) { s_mit_bad++; s_mit_why = 2U; return 0U; }
     if (BspServo_IsEncoderZeroed() == 0U)     { s_mit_bad++; s_mit_why = 3U; return 0U; }
     if (ident_busy() != 0U)                   { s_mit_bad++; s_mit_why = 4U; return 0U; }
+
+    /* A14/F3（长测 2026-11-23）：带高速余速切 MIT 必锁 0x0020 且模式回 NONE。
+     * MIT 无速度环、无轨迹规划，ep 被限到 ±1 rad 后满力矩输出，超速门限
+     * SERVO_CUR_WMAX(300 rpm) 会立即触发。与 do_current 同一门限（留 10% 余量）。 */
+    {
+        const float w_now = fabsf(BspServo_GetOmegaMech());
+        if (w_now > (0.9f * CMD_CUR_WMAX_RADS)) { s_mit_bad++; s_mit_why = 7U; return 0U; }
+    }
 
     Servo_SetEnable(0U);              /* 关模型三环 */
     Servo_SetMode(SERVO_MODE_POSITION);

@@ -695,26 +695,32 @@ static void dispatch(void)
          * （f0 ≤ 0.45·fs、Q 0.3~10），不回填的话上位机看到的是自己写的值，
          * 而环路里跑的是另一个数。 */
         uint8_t p96[24];
-        uint8_t en;
+        uint8_t en, order;
         float   f0, dep, q;
 
         memset(p96, 0, sizeof(p96));
         /* pl[0] = 0xFF 是"只读回"标记。为什么需要：上位机的 send() 会把载荷
-         * 补齐到声明长度，发不出"短帧"，所以读回不能靠长度区分。 */
+         * 补齐到声明长度，发不出"短帧"，所以读回不能靠长度区分。
+         * pl[1] = 阶次跟踪（2026-11-23）：0=固定 f0，k=陷波频率跟随 k 次/转。 */
         if ((s_rx_len >= 12u) && (pl[0] != 0xFFu)) {
             en  = (pl[0] != 0u) ? 1u : 0u;
+            order = (s_rx_len >= 2u) ? pl[1] : 0u;
             memcpy(&f0,  &pl[4], 4);
             memcpy(&dep, &pl[8], 4);
             if (s_rx_len >= 24u) { memcpy(&q, &pl[12], 4); }
             else                 { q = 2.0f; }
             Servo_SetNotch(en, f0, dep, q);
+            Servo_SetNotchOrder(order);
         } else {
             /* 短帧按"只读回"处理：上位机可以先发 4 B 查询当前配置 */
             Servo_GetNotch(&en, &f0, &dep, &q);
+            order = Servo_GetNotchOrder();
         }
 
         Servo_GetNotch(&en, &f0, &dep, &q);
+        order = Servo_GetNotchOrder();
         p96[0] = en;
+        p96[1] = order;
         memcpy(&p96[4],  &f0,  4);
         memcpy(&p96[8],  &dep, 4);
         memcpy(&p96[12], &q,   4);
@@ -1085,8 +1091,8 @@ static void dispatch(void)
         /* 原来只解析"当前模式对应的那一路"，切模式后另一路给定丢失。
          * 现在两条字段都进缓存；set 内部只装配当前模式那一路，另一路留作
          * 后续模式切换时由控制字使能直接装配。 */
-        float p_rad = MAV_P2RAD(ld_i64(&pl[0]));    /* pos_tar_p @ off0 */
-        float w     = MAV_PS2RADS(ld_f32(&pl[28])); /* speed_tar_p_s @ off28 */
+        float p_rad = MAV_P2RAD(ld_i64(&pl[0]));   /* pos_tar_p：输出端角度（位置环已改输出端口径） */
+        float w     = MAV_PS2RADS(ld_f32(&pl[28])); /* speed_tar_p_s @ off28（仍是电机端） */
         /* acc_tar_p_ss @ off32：脉冲/s² → rad/s²。0=旁带未填，跳过（避免每帧
          * 把加速度重置成 0 触发下限夹到 5）。非 0 才写入手写速度环斜坡。 */
         float a_pss = ld_f32(&pl[32]);
@@ -1136,9 +1142,9 @@ static void dispatch(void)
         break;
     }
     case MAV_MSG_MIT_CTL_IN: {              /* 30065 MIT 给定：pos@0 tq@16 speed@24 */
-        float p    = MAV_P2RAD(ld_i64(&pl[0]));
+        float p    = MAV_P2RAD(ld_i64(&pl[0])) * ACT_GEAR_RATIO;  /* pos：输出端→电机端 */
         float tau  = ld_f32(&pl[16]);
-        float v    = MAV_PS2RADS(ld_f32(&pl[24]));
+        float v    = MAV_PS2RADS(ld_f32(&pl[24])) * ACT_GEAR_RATIO; /* speed：输出端→电机端 */
         float kp = 0.0f, kd = 0.0f;
         AppParam_GetMit(0, 0, &kp, &kd, 0);   /* kp/kd 来自 30066 配置或默认值 */
         st = AppParam_SetMitCmd(p, v, kp, kd, tau);
@@ -1147,11 +1153,12 @@ static void dispatch(void)
         {
             float rp = 0.0f, p_now = 0.0f;
             AppParam_GetMit(&rp, 0, 0, 0, 0);
+            rp /= ACT_GEAR_RATIO;             /* 回读输出端 */
             memcpy(&resp[1], &rp, 4);
             /* 实际位置（theta_multi 口径，rad）：直接用编码器实测角，而不是
              * Servo_GetMitState 的 s_mit_p_now —— 后者在刚使能那一拍还是旧值（0）。
              * 上位机用它贴当前位置起步，避免 kp·e 冲击。 */
-            p_now = BspServo_GetThetaMulti();
+            p_now = BspServo_GetThetaMulti() / ACT_GEAR_RATIO;   /* 回读输出端 */
             memcpy(&resp[5], &p_now, 4);
         }
         if (st != APP_PARAM_SUCCESS && s_locked < 0xFFFFu) { s_locked++; }

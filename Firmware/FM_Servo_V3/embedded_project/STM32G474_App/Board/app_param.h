@@ -40,6 +40,17 @@ typedef enum {
 #define APP_ENC_COUNTS    (2097152.0f)
 #define APP_TWO_PI        (6.283185307179586f)
 
+/* 关节减速比（2026-11-24）：行星减速器 9:1。
+ *
+ * 位置模式（30019 给定 / 30100 回读）与 MIT（30065 给定 + 应答）的
+ * **位置设定与回读对外一律用输出端角度**：
+ *   · 位置环（2026-11-24）：内部坐标已改输出端口径（pos_coord = theta_multi/9），
+ *     协议边界不再做 ×9/÷9，给定/回读直接就是输出端；
+ *   · MIT：内部仍是电机端多圈角（theta_multi），协议边界 ×9（收）/÷9（发），
+ *     kp/kd（力矩/电机端误差）语义不变。
+ * 速度环/电流环全程保持电机端不变。换减速器时只改这一个宏。 */
+#define ACT_GEAR_RATIO     (9.0f)
+
 /* 系统命令（对应 30069 Sys_cmd，参考工程语义；首期实现 0/1/2） */
 #define APP_SYS_CMD_NONE       (0U)
 #define APP_SYS_CMD_SAVE_PARAM (1U)   /* 存参数到 Flash */

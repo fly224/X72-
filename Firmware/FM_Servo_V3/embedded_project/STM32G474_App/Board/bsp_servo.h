@@ -417,6 +417,8 @@ uint8_t  Servo_GetPhaseTrip(void);
  * 参数只存 RAM，上电默认关闭；配置走 30096 AppAdvCfg。 */
 void    Servo_SetNotch(uint8_t en, float f0_hz, float depth_db, float q);
 void    Servo_GetNotch(uint8_t *en, float *f0_hz, float *depth_db, float *q);
+void    Servo_SetNotchOrder(uint8_t order);       /* 阶次跟踪：0=固定 f0，k=跟随 k 次/转 */
+uint8_t Servo_GetNotchOrder(void);
 
 /* ---- 编码器电角度下的 dq 电流闭环（力矩模式）----
  * 与上面"虚拟角"版本共用同一套 PI/限幅，唯一区别是 θ 来自编码器：

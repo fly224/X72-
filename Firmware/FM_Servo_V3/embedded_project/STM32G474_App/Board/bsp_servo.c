@@ -12,6 +12,7 @@
  */
 #include "bsp_servo.h"
 #include "uart_link.h"          /* 仅用于启动分步打点，运行期不调用 */
+#include "enc_comp.h"           /* 编码器角度谐波补偿（30098 写系数，本文件用于速度） */
 /* 状态指示灯的"参数辨识"判据要查这六个模块的忙状态。
  * 这些头只依赖 <stdint.h>，与本文件无循环依赖。 */
 #include "motor_ident.h"
@@ -31,6 +32,10 @@
 #include <string.h>
 
 /* ---------------- 静态状态（无动态分配） ---------------- */
+/* 极对数：30098 的系数是电角度域，换算成机械角要除以它。
+ * 与 three_loop_deploy.c 的 14.0、telemetry_tx.c 的 POLE_PAIRS 必须一致；
+ * 换电机时这三处一起改。 */
+#define BSP_ENC_COMP_POLES  (14.0f)
 static volatile uint32_t s_fault = 0U;
 static volatile uint8_t  s_pwm_enabled = 0U;
 
@@ -1146,6 +1151,40 @@ float BspServo_GetThetaRad(void)
     /* 速度：8 拍累计差分（详见 bsp_servo.h 的说明）。
      * 单拍差分在高分辨率编码器上并不更好——量化噪声 ±1 count 直接被 50 us 放大，
      * 实测让 30 rpm 的 omega 读数 std 达到 18.8 rpm，速度环没法用。 */
+    /* ---- 编码器角度谐波补偿（机械角域，2026-11-23）----
+     *
+     * MT6835 的读数含**随转子位置重复**的误差。实测 1560 rpm、两次独立录波
+     * 按角度分箱后曲线相关 0.999：整圈峰峰 7 mrad，其中 4 次/转 2.4 mrad、
+     * 2 次 0.8 mrad、3 次 0.6 mrad。属确定性几何误差（磁钢/安装），可补偿。
+     *
+     * 为什么必须在**测速**这一层补：角度误差直接变成速度读数误差
+     *   w_err = d(eps)/dt = k·A_k·ω·cos(kθ)
+     * 1560 rpm 时 4 次/转项对应 7.08 rpm（实测速度纹波 7.05 rpm，吻合），
+     * 速度环把它当真实误差，输出 ±0.36 A 的假力矩 → 又变成真的力矩脉动。
+     * 1560 rpm 实测：补偿前 rms 10.7 rpm，用拟合系数离线补偿后 1.9 rpm。
+     *
+     * 系数来自 30098（EncComp_Eval 返回"加到电角度上的修正量"），这里除以
+     * 极对数换成机械角。30098 未写入时 Eval 恒 0，本段对既有行为零影响。
+     *
+     * 只补速度，不动 s_theta_multi（整数脉冲累积）与位置环：位置链路的一致
+     * 性（含 enc_sum 遥测）留给后续单独处理，避免一次改两处不好定位。 */
+    {
+        static float   s_ecm_prev;
+        static uint8_t s_ecm_first = 1U;
+        const float ecm = EncComp_Eval(theta) * (1.0f / BSP_ENC_COMP_POLES);
+
+        if (s_ecm_first != 0U) {
+            s_ecm_first = 0U;
+        } else {
+            const float dec = ecm - s_ecm_prev;
+
+            /* 改系数会让 ecm 整体平移，那一拍不补，避免速度读数出现台阶。
+             * 正常单拍变化远小于此：1560 rpm、4 次/转 @2.4 mrad 时约 2e-5 rad。 */
+            if (fabsf(dec) < 0.002f) { s_spd_acc += dec; }
+        }
+        s_ecm_prev = ecm;
+    }
+
     s_spd_acc += d;
     if (++s_spd_cnt >= BSP_SPEED_AVG_N) {
         const float w_raw = s_spd_acc / (BSP_TS_CURRENT * (float)BSP_SPEED_AVG_N);
