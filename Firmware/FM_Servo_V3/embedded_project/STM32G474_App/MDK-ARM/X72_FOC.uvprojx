@@ -747,6 +747,16 @@
               <FilePath>../Board/can_proto.c</FilePath>
             </File>
             <File>
+              <FileName>canopen.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Board/canopen.c</FilePath>
+            </File>
+            <File>
+              <FileName>canopen.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../Board/canopen.h</FilePath>
+            </File>
+            <File>
               <FileName>motor_ident.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Board/motor_ident.c</FilePath>

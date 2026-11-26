@@ -4,6 +4,11 @@
  */
 #include "can_proto.h"
 #include "fdcan.h"
+
+/* 标准 CANopen 从站（canopen.c）。与下面自定义 L1 协议的 COB-ID 冲突，
+ * 两者只能启用一个；标准主站场景下关掉 L1、只留 CANopen。 */
+#define CANOPEN_ENABLE   (1)
+#include "canopen.h"
 #include "telemetry_tx.h"
 #include "mavlink_common.h"
 #include "bsp_servo.h"
@@ -139,6 +144,8 @@ void CanProto_Init(void)
     (void)CanProto_TestStart((uint8_t)CAN_TEST_AUTO_ROLE);
 #endif
 #endif
+
+    Canopen_Init();          /* 清对象字典状态，Boot-up 由 Task1ms 第一拍发出 */
 }
 
 void CanProto_Stop(void)
@@ -413,6 +420,12 @@ static void can_push_test_result(uint8_t role)
         n  = (uint16_t)((s_rx_ok > 0xFFFFu) ? 0xFFFFu : s_rx_ok);
     }
 
+#if defined(CANOPEN_MASTER_TEST) && (CANOPEN_MASTER_TEST != 0)
+    /* 主站自测：用 kind=11 上报 SDO 统计（can_monitor.py 可读） */
+    Canopen_MasterGetStats(v8);
+    ok = (uint8_t)((Canopen_MasterRxOk() > 0u) && (Canopen_MasterRxBad() == 0u)) ? 1u : 0u;
+    n  = Canopen_MasterRxOk();
+#endif
     Telemetry_PushIdentResult(MAV_ID_CAN_TEST, ok, n, v8, 0.0f);
 }
 
@@ -739,10 +752,22 @@ static uint8_t can_tx_due(void)
  * 占掉），加一项必须升 PS_VERSION，会把现场已标定的零点/齿槽表全部作废，代价太大。
  * 文档把它列为 P2（配合 rated_torque 一起进参数区），届时按机型写 Flash。
  * 在此之前：总线上的一切角度/转速都是**输出侧**，内部乘除用这个常数。
- * 本机型减速比 = 10（用户 2026-11-22 确认），不要再按文档里的 100:1 估算力矩。 */
+ *
+ * ⚠ 2026-11-25 修正 10 → 9：原注释写"本机型减速比 = 10（用户 2026-11-22 确认）"，
+ * 但减速器规格书明确是 **9:1**（额定 6 N·m/360 r/min 输出端那一栏），
+ * 且固件位置环用的 `ACT_GEAR_RATIO` 也是 9（app_param.h:52）。
+ * 两处不一致会让 CAN 侧的目标位置/力矩**偏 11%**，且诊断上很难看出来
+ * （电机端读数永远正常，只有输出端折算错）。
+ * 保持一致：CAN_GEAR_RATIO 必须恒等于 ACT_GEAR_RATIO。 */
 #ifndef CAN_GEAR_RATIO
-#define CAN_GEAR_RATIO     (10.0f)
+#define CAN_GEAR_RATIO     (9.0f)
 #endif
+
+/* 编译期检查：万一以后有人只改一处，这里会直接报错而不是静默偏 11%。
+ * 用 (int) 转换比较 —— 浮点比较放进数组维度/静态断言会被当成 VLA 扩展，
+ * 转成整数常量后才是合法的整型常量表达式。 */
+_Static_assert((int)CAN_GEAR_RATIO == (int)ACT_GEAR_RATIO,
+               "CAN_GEAR_RATIO must equal ACT_GEAR_RATIO");
 
 #define CAN_DAMP_KD        (0.50f)   /* 超时后第一级阻尼的 kd（N·m·s/rad，电机侧） */
 #define CAN_DISARM_MS      (50u)     /* 阻尼后再过 50 ms 仍无指令 → 断使能 */
@@ -938,22 +963,166 @@ static uint8_t can_l1_send(uint16_t id, const uint8_t *buf, uint32_t dlc)
     return 0u;
 }
 
-/* 自环验证用的固定图案：收发两端都能由 cycle_cnt 独立算出，便于逐字段比对 */
-/* CiA402 状态字（文档 5.2）。现有状态字是私有布局：
- * bit0 使能 / bit1 故障 / bit2 到位 / bit[5:3] 模式，这里重排成标准八态。 */
+/* ================= CiA402 八态状态机（2026-11-25） =================
+ *
+ * 原实现只有 3 态（Fault / Operation enabled / Switch on disabled），是"私有状态字
+ * 套了一层 CiA402 外衣"：主站发 Shutdown 无从响应，Fault reset 也没有上升沿语义。
+ * 这里补成 CiA402 §6.1 的完整八态。
+ *
+ * 控制字入口统一为 16 位（`can_cia402_step(cw)`）：
+ *   · 现在由 CMD_AGG 的 flags 翻译而来（can_flags_to_cw）；
+ *   · 将来接标准 CANopen 主站时，直接喂 0x6040 的 16 位即可，状态机不用改。
+ *
+ * 与原有接口的映射：Operation enabled→ServoCmd_Arm，其余→Disarm，
+ * Fault reset→ServoCmd_ClearFault。Arm 有联锁（未标定/未使能零点会失败），
+ * 失败时**留在 SWITCHED_ON**，让主站从状态字 0x0023 看出"使能被拒"，
+ * 而不是假装已使能。
+ */
+typedef enum {
+    CIA402_NOT_READY = 0,
+    CIA402_SWITCH_ON_DISABLED,
+    CIA402_READY_TO_SWITCH_ON,
+    CIA402_SWITCHED_ON,
+    CIA402_OPERATION_ENABLED,
+    CIA402_QUICK_STOP_ACTIVE,
+    CIA402_FAULT_REACTION,
+    CIA402_FAULT
+} cia402_state_t;
+
+static cia402_state_t s_cia_state = CIA402_NOT_READY;
+static uint16_t       s_cia_cw_last;
+
+/* CiA402 §6.1 命令解码：只看 bit1(Enable voltage) / bit2(Quick stop) / bit3(Enable op) */
+enum { CIA_CMD_DISABLE_V = 1, CIA_CMD_QUICK_STOP, CIA_CMD_SHUTDOWN,
+       CIA_CMD_SWITCH_ON, CIA_CMD_ENABLE_OP };
+
+static uint8_t cia402_cmd(uint16_t cw)
+{
+    const uint8_t b1 = (uint8_t)((cw >> 1) & 1u);
+    const uint8_t b2 = (uint8_t)((cw >> 2) & 1u);
+    const uint8_t b3 = (uint8_t)((cw >> 3) & 1u);
+
+    if ((b1 == 0u) && (b2 == 0u)) { return CIA_CMD_DISABLE_V; }
+    if ((b1 == 0u) && (b2 == 1u)) { return CIA_CMD_QUICK_STOP; }
+    if ((b1 == 1u) && (b2 == 0u)) { return CIA_CMD_SHUTDOWN; }
+    if (b3 == 0u)                 { return CIA_CMD_SWITCH_ON; }
+    return CIA_CMD_ENABLE_OP;
+}
+
+/* flags → 16 位控制字（保持原有帧格式不变）
+ *   bit1 使能       → Enable operation (0x0F)
+ *   bit2 快停       → Quick stop       (0x02)，优先级最高
+ *   bit3 Shutdown   → 0x06
+ *   bit4 Switch on  → 0x07
+ *   bit5 Fault reset→ bit7（状态机内部做上升沿） */
+static uint16_t can_flags_to_cw(uint8_t f)
+{
+    uint16_t cw = 0x0000u;
+
+    if ((f & 0x04u) != 0u) { cw = 0x0002u; }            /* 快停优先 */
+    else if ((f & 0x02u) != 0u) { cw = 0x000Fu; }       /* 使能 */
+    else if ((f & 0x08u) != 0u) { cw = 0x0006u; }       /* Shutdown */
+    else if ((f & 0x10u) != 0u) { cw = 0x0007u; }       /* Switch on */
+    if ((f & 0x20u) != 0u) { cw |= 0x0080u; }           /* Fault reset */
+    return cw;
+}
+
+static void can_cia402_step(uint16_t cw)
+{
+    const uint8_t fault = (BspServo_GetFault() != 0u) ? 1u : 0u;
+    const uint8_t fr    = (uint8_t)(((cw & 0x0080u) != 0u) &&
+                                    ((s_cia_cw_last & 0x0080u) == 0u));  /* 上升沿 */
+    const uint8_t cmd   = cia402_cmd(cw);
+
+    s_cia_cw_last = cw;
+
+    if (s_cia_state == CIA402_NOT_READY) {
+        s_cia_state = CIA402_SWITCH_ON_DISABLED;
+    }
+
+    /* 故障优先，任何状态都直接进 FAULT（略过 REACTION，BSP 已封锁输出） */
+    if (fault != 0u) {
+        if (s_cia_state != CIA402_FAULT) {
+            s_cia_state = CIA402_FAULT;
+            (void)ServoCmd_Disarm();
+        }
+        return;
+    }
+    if (s_cia_state == CIA402_FAULT) {
+        if (fr != 0u) {
+            (void)ServoCmd_ClearFault();
+            s_cia_state = CIA402_SWITCH_ON_DISABLED;
+        }
+        return;
+    }
+
+    switch (s_cia_state) {
+    case CIA402_SWITCH_ON_DISABLED:
+        if (cmd == CIA_CMD_SHUTDOWN) { s_cia_state = CIA402_READY_TO_SWITCH_ON; }
+        /* 兼容路径（2026-11-25）：老上位机只发 flags bit1=1（=Enable operation），
+         * 不会跑 Shutdown→Switch on→Enable 的三步序列。严格 CiA402 下这里应当
+         * 拒绝，但现场设备不可能为了新固件全部改主站，所以允许**补齐前置状态**
+         * 直接使能。标准主站走正常序列时不会进这条分支（状态已经 >= SWITCHED_ON）。 */
+        else if (cmd == CIA_CMD_ENABLE_OP) {
+            if (ServoCmd_Arm() != 0u) { s_cia_state = CIA402_OPERATION_ENABLED; }
+        }
+        break;
+
+    case CIA402_READY_TO_SWITCH_ON:
+        if (cmd == CIA_CMD_SWITCH_ON) { s_cia_state = CIA402_SWITCHED_ON; }
+        else if (cmd == CIA_CMD_ENABLE_OP) {      /* 同上：兼容一键使能 */
+            if (ServoCmd_Arm() != 0u) { s_cia_state = CIA402_OPERATION_ENABLED; }
+        }
+        else if ((cmd == CIA_CMD_DISABLE_V) || (cmd == CIA_CMD_QUICK_STOP)) {
+            s_cia_state = CIA402_SWITCH_ON_DISABLED;
+        }
+        break;
+
+    case CIA402_SWITCHED_ON:
+        if (cmd == CIA_CMD_ENABLE_OP) {
+            /* Arm 失败（未标定/未标零点/辨识占用）→ 留在 SWITCHED_ON，状态字如实反映 */
+            if (ServoCmd_Arm() != 0u) { s_cia_state = CIA402_OPERATION_ENABLED; }
+        } else if (cmd == CIA_CMD_SHUTDOWN) { s_cia_state = CIA402_READY_TO_SWITCH_ON; }
+        else if ((cmd == CIA_CMD_DISABLE_V) || (cmd == CIA_CMD_QUICK_STOP)) {
+            s_cia_state = CIA402_SWITCH_ON_DISABLED;
+        }
+        break;
+
+    case CIA402_OPERATION_ENABLED:
+        if (cmd == CIA_CMD_DISABLE_V) { (void)ServoCmd_Disarm(); s_cia_state = CIA402_SWITCH_ON_DISABLED; }
+        else if (cmd == CIA_CMD_QUICK_STOP) { (void)ServoCmd_Disarm(); s_cia_state = CIA402_QUICK_STOP_ACTIVE; }
+        else if (cmd == CIA_CMD_SHUTDOWN) { (void)ServoCmd_Disarm(); s_cia_state = CIA402_READY_TO_SWITCH_ON; }
+        break;
+
+    case CIA402_QUICK_STOP_ACTIVE:
+        if (cmd == CIA_CMD_DISABLE_V) { s_cia_state = CIA402_SWITCH_ON_DISABLED; }
+        break;
+
+    default:
+        s_cia_state = CIA402_SWITCH_ON_DISABLED;
+        break;
+    }
+}
+
+/* CiA402 状态字（§6.3） */
 static uint16_t can_cia402_sw(void)
 {
-    uint32_t st = AppParam_GetStatusWord();
     uint16_t sw;
 
-    if ((st & 0x0002u) != 0u) {
-        sw = 0x0008u;                        /* Fault */
-    } else if ((st & 0x0001u) != 0u) {
-        sw = 0x0027u;                        /* Operation enabled */
-    } else {
-        sw = 0x0040u;                        /* Switch on disabled */
+    switch (s_cia_state) {
+    case CIA402_NOT_READY:          sw = 0x0000u; break;
+    case CIA402_SWITCH_ON_DISABLED: sw = 0x0040u; break;
+    case CIA402_READY_TO_SWITCH_ON: sw = 0x0021u; break;
+    case CIA402_SWITCHED_ON:        sw = 0x0023u; break;
+    case CIA402_OPERATION_ENABLED:  sw = 0x0027u; break;
+    case CIA402_QUICK_STOP_ACTIVE:  sw = 0x0007u; break;
+    case CIA402_FAULT_REACTION:     sw = 0x000Fu; break;
+    case CIA402_FAULT:              sw = 0x0008u; break;
+    default:                        sw = 0x0000u; break;
     }
-    if ((st & 0x0004u) != 0u) { sw |= 0x0400u; }   /* Target reached */
+    /* bit10 Target reached：沿用私有状态字的 bit2 */
+    if ((AppParam_GetStatusWord() & 0x0004u) != 0u) { sw |= 0x0400u; }
+    sw |= 0x0200u;                        /* bit9 Remote：本节点接受远程控制 */
     return sw;
 }
 
@@ -963,12 +1132,13 @@ static void can_l1_apply(const CanAggCmd *c)
     uint8_t slot = (uint8_t)CAN_SLOT_ID;
     float p0, v0, kp0, kd0, tau0;
 
+    /* 先跑 CiA402 状态机：快停 / 使能 / 故障复位统一由它处理，
+     * 原来这里只判 bit2 快停、其余靠 ServoCmd_IsArmed()，没有状态概念。 */
+    can_cia402_step(can_flags_to_cw(c->flags));
+
     if (slot >= c->n_slots) { return; }      /* 本节点不在这一帧的覆盖范围 */
-    if ((c->flags & 0x04u) != 0u) {          /* bit2 快停 */
-        (void)ServoCmd_Disarm();
-        return;
-    }
-    if (ServoCmd_IsArmed() == 0u) { return; } /* 未使能只解析，不下发 */
+    /* 非使能态只解析、不下发（等价于原来的 "未使能只解析"） */
+    if (s_cia_state != CIA402_OPERATION_ENABLED) { return; }
 
     AppParam_GetMit(&p0, &v0, &kp0, &kd0, &tau0);   /* kp/kd 用 30066 配的值 */
 
@@ -1052,6 +1222,20 @@ static void can_l1_rx(void)
             break;
         }
 
+        /* 标准 CANopen 优先处理（NMT 0x000 / SDO 0x601）。命中就直接吃掉这一帧，
+         * 不落到下面的自定义 L1 分支 —— 两套 ID 体系不能混判。 */
+#if defined(CANOPEN_MASTER_TEST) && (CANOPEN_MASTER_TEST != 0)
+        /* 主站自测：只捕获 SDO 应答（0x581），从站逻辑不参与 */
+        if (Canopen_MasterOnFrame(rx.Identifier, rd, (uint8_t)rx.DataLength) != 0u) {
+            continue;
+        }
+#else
+        if (Canopen_OnFrame(rx.Identifier, rd, (uint8_t)rx.DataLength) != 0u) {
+            continue;
+        }
+#endif
+        if (s_l1_on == 0u) { continue; }     /* 自定义 L1 未启用，其余帧忽略 */
+
         switch (rx.Identifier) {
         case CAN_ID_CMD_AGG:
             if (rx.DataLength == FDCAN_DLC_BYTES_64) {
@@ -1086,9 +1270,32 @@ void CanProto_L1Task1ms(void)
 {
     uint8_t buf[64];
 
-    if (s_l1_on == 0u) { return; }
+#if defined(CANOPEN_MASTER_TEST) && (CANOPEN_MASTER_TEST != 0)
+    Canopen_MasterPoll1ms();     /* 主站自测：100 ms 发一次 SDO 读 */
 
+    /* 独立上报：can_push_periodic() 在 #if (PROD_BUILD==0) 里，生产构建取不到，
+     * 而主站自测正是要在生产构建上跑，所以这里自己报一条（1 Hz，kind=11）。 */
+    {
+        static uint16_t rep_div;
+        if (++rep_div >= 1000u) {
+            float mv8[8];
+            rep_div = 0u;
+            Canopen_MasterGetStats(mv8);
+            Telemetry_PushIdentResult(MAV_ID_CAN_TEST,
+                                      (uint8_t)((Canopen_MasterRxOk() > 0u) &&
+                                                (Canopen_MasterRxBad() == 0u)) ? 1u : 0u,
+                                      Canopen_MasterRxOk(), mv8, 0.0f);
+        }
+    }
+#else
+    Canopen_Task1ms();
+#endif
+
+    /* 收帧必须**无条件**跑：CANopen（NMT/SDO）不依赖自定义 L1 是否启用，
+     * 原来把它放在 `if (s_l1_on == 0) return;` 之后，标准主站发的 SDO 会被直接丢掉。 */
     can_l1_rx();
+
+    if (s_l1_on == 0u) { return; }
 
     /* 失效安全：只在主站**曾经上线**（收到过 CMD_AGG）后才计时并断使能。
      *

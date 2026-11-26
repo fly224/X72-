@@ -46,22 +46,22 @@ void MX_FDCAN1_Init(void)
    *         85 MHz ÷ 1 = 85 MHz，17 TQ → 5 Mbit/s（数据，BRS）
    *         两段都是 1+12+4 = 17 TQ，采样点 76.5%，SJW=3。
    * 原配置：DIV1（170 MHz）、FD_NO_BRS、17/7/2 → 只有 1 Mbit/s 且数据段不加速。 */
-  hfdcan1.Init.ClockDivider = FDCAN_CLOCK_DIV2;
-  hfdcan1.Init.FrameFormat = FDCAN_FRAME_FD_BRS;
+  hfdcan1.Init.ClockDivider = FDCAN_CLOCK_DIV1;
+  hfdcan1.Init.FrameFormat = FDCAN_FRAME_FD_NO_BRS;
   hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
   hfdcan1.Init.AutoRetransmission = DISABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
-  hfdcan1.Init.NominalPrescaler = 5;
-  hfdcan1.Init.NominalSyncJumpWidth = 3;
-  hfdcan1.Init.NominalTimeSeg1 = 12;
-  hfdcan1.Init.NominalTimeSeg2 = 4;
-  hfdcan1.Init.DataPrescaler = 1;
-  hfdcan1.Init.DataSyncJumpWidth = 3;
-  hfdcan1.Init.DataTimeSeg1 = 12;
-  hfdcan1.Init.DataTimeSeg2 = 4;
-  hfdcan1.Init.StdFiltersNbr = 2;
-  hfdcan1.Init.ExtFiltersNbr = 0;
+  hfdcan1.Init.NominalPrescaler = 17;
+  hfdcan1.Init.NominalSyncJumpWidth = 1;
+  hfdcan1.Init.NominalTimeSeg1 = 7;
+  hfdcan1.Init.NominalTimeSeg2 = 2;
+  hfdcan1.Init.DataPrescaler = 17;
+  hfdcan1.Init.DataSyncJumpWidth = 1;
+  hfdcan1.Init.DataTimeSeg1 = 7;
+  hfdcan1.Init.DataTimeSeg2 = 2;
+  hfdcan1.Init.StdFiltersNbr = 5;
+  hfdcan1.Init.ExtFiltersNbr = 5;
   hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)
   {
