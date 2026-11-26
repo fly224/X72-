@@ -27,10 +27,11 @@ static float s_p_target    = 0.0f;   /* rad（编码器坐标系） */
 static float s_mit_p       = 0.0f;
 static float s_mit_v       = 0.0f;
 static float s_mit_kp      = 30.0f;  /* 与 mit_run.py 优化默认值一致 */
-/* kd 默认 0.10（2026-11-24）：静止嗡嗡声是 MIT 闭环固有频率 ωn=√(kp/J)≈90Hz
- * 的欠阻尼振荡（kd 扫描实测：0.02→0.10 时 90Hz 幅值 0.159→0.012 mrad，-92%）。
- * 0.10 对应阻尼比 ζ≈0.94（临界阻尼），远低于 kd=0.5 起 244Hz 极限环的阈值。 */
-static float s_mit_kd      = 0.10f;
+/* kd 默认 0.30（2026-11-25）：减速比 9 后，输出端阻尼比 = 电机端/3。
+ * kd=0.10 时输出端 ζ=0.31（欠阻尼），目标偏移时过冲、瞬时速度超 MIT 门限
+ * 30 rad/s → fault=0x0020（实测 δ=0.4rad 峰值 299.5 rpm）。kd=0.30 使输出端
+ * ζ≈0.94 临界阻尼，消除过冲。仍低于 kd=0.5 起 244Hz 极限环的阈值。 */
+static float s_mit_kd      = 0.30f;
 static float s_mit_tau     = 0.0f;
 
 /* 给定就绪标志：控制字 bit0 由 0→1 时，按 s_op_mode 选最近一次显式下发过的
@@ -56,7 +57,7 @@ void AppParam_Init(void)
     s_mit_p = 0.0f;
     s_mit_v = 0.0f;
     s_mit_kp = 30.0f;
-    s_mit_kd = 0.10f;   /* 与顶部默认值一致（2026-11-24 提阻尼消除静止嗡嗡声） */
+    s_mit_kd = 0.30f;   /* 与顶部默认值一致（2026-11-25 减速比9后输出端临界阻尼） */
     s_mit_tau = 0.0f;
     s_iq_valid = 0U;
     s_w_valid  = 0U;

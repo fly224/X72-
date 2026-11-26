@@ -20,7 +20,11 @@
 #include <math.h>
 #include <string.h>
 
-#define EC_RPM_DEFAULT   (600.0f)
+#define EC_RPM_DEFAULT   (700.0f)     /* 700rpm：MT6835 自校准要求速度波动 <3%，
+                                        * 600rpm 实测 pp 3.05% 超线 → chip_status=2 失败；
+                                        * 780rpm 实测 <2% 但太贴 800 上限，芯片偶发判超区间
+                                        * 拒绝进入自校准 → chip_status=0 超时。
+                                        * 700rpm 实测 2.35% <3%，且离 800 边界 100rpm 余量。 */
 #define EC_RPM_LO        (400.0f)     /* AUTO_CAL_FREQ=0x03 的下界 */
 #define EC_RPM_HI        (800.0f)
 #define EC_SETTLE_MS     (3000U)      /* 匀速确认窗口 */
@@ -116,7 +120,9 @@ static void ec_push_result(uint8_t ok)
     v[3] = s_res.rpm_max;
     v[4] = (float)s_res.chip_status;
     v[5] = (float)s_res.elapsed_ms;
-    v[6] = (float)s_res.ol_mode;
+    /* 失败时 v[6] 上报 AUTO_CAL_FREQ（诊断 chip_status=2 用：判断 EEPROM 是否写坏
+     * 导致转速区间不对）；成功时保持 ol_mode 语义。 */
+    v[6] = ok ? (float)s_res.ol_mode : (float)s_res.auto_cal_freq;
     v[7] = s_rpm_tgt;
 
     Telemetry_PushIdentResult(MAV_ID_ENC_CAL, ok, 0u, v, 0.0f);
@@ -215,6 +221,20 @@ EncCalErr EncCal_Start(float rpm)
     s_res.rpm_min    = 1.0e9f;
     s_res.rpm_max    = -1.0e9f;
 
+    /* 自愈：AUTO_CAL_FREQ 被写坏成非 0x03（本板实测 0x04=200~400rpm）时，
+     * 写回 0x03 并烧录 EEPROM。否则校准转速 700rpm 落在芯片自校准区间外，
+     * 芯片立即判 chip_status=2。 */
+    {
+        uint8_t reg = BspServo_ReadEncReg(0x00EU);
+        uint8_t acf = (uint8_t)((reg >> 1) & 0x07U);
+        if (acf != 0x03U) {
+            reg = (uint8_t)((reg & ~0x0EU) | 0x06U);   /* [3:1]=011，保留 GPIO_DS/保留位 */
+            BspServo_WriteEncReg(0x00EU, reg);
+            (void)BspServo_BurnEeprom();
+        }
+        s_res.auto_cal_freq = (uint8_t)((BspServo_ReadEncReg(0x00EU) >> 1) & 0x07U);
+    }
+
     s_rpm_tgt = rpm;
     s_t       = 0U;
     s_tmo     = 0U;
@@ -224,17 +244,18 @@ EncCalErr EncCal_Start(float rpm)
     s_ol      = 0U;
     s_res.ol_mode = 0U;
 
-    /* 直接用开环拖动起步（不再先试速度闭环）。
+    /* 优先速度闭环拖动（2026-11-25 改回）：
+     * 编码器角度可信时，闭环拖动稳定、不丢步，能可靠进 400~800 rpm。
      *
-     * 为什么改：本板编码器角度一旦不可信，闭环一使能就在 1 ms 内报 f=0x20
-     * （实测 iq 顶 3 A 而转速恒 0），EncCal_Task1ms 的故障检查立刻判
-     * EC_ERR_FAULT 退出，根本轮不到"8 s 超时后改开环"那条兜底。
-     * 而 MT6835 自校准只要求磁钢**匀速旋转**，由谁驱动、是否闭环都无所谓；
-     * 开环强制角不读编码器，天然对这个失效模式免疫。
+     * 之前"直接开环起步"是为绕开"编码器角度不可信 → 闭环一使能就假超速 f=0x20"，
+     * 但开环 I-f 拖动在这台电机上失步：实测转速 40~214 rpm 进不了区间
+     * → EC_ERR_SPEED；且失步乱转会触发编码器"角度跳变检测" → 次生
+     * fault=0x0002（被误判成编码器故障，掩盖了真正原因）。
      *
-     * 代价：开环同步转矩比闭环小，重载可能失步。由 SETTLE 阶段的
-     * "3 s 至少转 1 圈"位置核对兜住，转不动就报 EC_ERR_SPEED 而不是干等。 */
-    ec_switch_ol();
+     * 现在编码器恢复，先走闭环；若编码器又坏，闭环会报假超速 f=0x20，
+     * SPINUP 的故障检查会清故障 + 回退开环（ec_switch_ol），兜底仍在。 */
+    Servo_SetSpeedMode(1U, (s_rpm_tgt / 60.0f) * 6.28318531f);
+    BspServo_PwmEnable(1U);
 
     if (BspServo_IsPwmEnabled() == 0U) {
         ec_fail(EC_ERR_PWM);

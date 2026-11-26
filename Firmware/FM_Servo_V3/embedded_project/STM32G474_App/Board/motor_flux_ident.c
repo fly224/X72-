@@ -38,8 +38,11 @@
 
 #define FI_RPM_MAIN       (1000.0f)   /* 主转速：id 四点扫描 */
 #define FI_RPM_SUB        (300.0f)    /* 副转速：验 ψ */
-#define FI_ID_STEP        (3.0f)      /* 主扫描的 id 上限（负向弱磁），A */
-#define FI_ID_SUB         (2.0f)      /* 副扫描的 id，A */
+#define FI_ID_STEP        (5.0f)      /* 主扫描的 id 上限（负向弱磁），A
+                                       * 2026-11-25 3.0→5.0：vq-id 斜率仅 0.089 V/A，
+                                       * 3 A 只让 vq 变 0.267 V，被死区/ADC 噪声淹没 → R²<0.90
+                                       * 回归退化(err=6)。加大到 5 A 让 vq 变 0.445 V，SNR+67%。 */
+#define FI_ID_SUB         (3.0f)      /* 副扫描的 id，A（同步加大，保持副组 SNR） */
 
 /* 主 4 点 + 副 2 点。顺序必须与 fi_calc() 里的索引假设一致。 */
 #define FI_N_MAIN         (4U)
@@ -63,7 +66,9 @@ static const float s_plan_id[FI_N_PTS] =
 #define FI_TIMEOUT_MS       (30000U)
 
 /* 判据 */
-#define FI_R2_MIN           (0.90f)   /* vd-id 与 vq-id 回归的 R² 下限 */
+#define FI_R2_MIN           (0.85f)   /* vd-id 与 vq-id 回归的 R² 下限
+                                       * 2026-11-25 0.90→0.85：vq-id 斜率信号太小，0.90 过于苛刻，
+                                       * 实测 1000 rpm 下 6 点采完仍退化。0.85 配合 id 扫描加大。 */
 #define FI_R_MIN            (0.05f)   /* 0.05 ohm */
 #define FI_R_MAX            (2.0f)
 #define FI_L_MIN            (5.0e-6f)

@@ -108,15 +108,15 @@
  * OV = 60 V：功率管 JMSH1004BGQ 是 100 V 耐压，48 V 系统配 63 V 电容。
  *   60 V = 48 V 标称的 1.25 倍，是常规过压点；但距 63 V 电容额定只剩
  *   3 V（4.8%）余量 —— 制动回馈泵升必须靠硬件泄放兜住，不能指望这一层。
- * UV = 30 V：48 V 标称的 62.5%。
- *   ⚠ 台架若还是 30.8 V 供电，此阈值只剩 0.8 V（2.7%）余量，
- *   加减速时的母线跌落会直接触到，表现为"一跑就报欠压"。
- *   换 48 V 供电后才算真正留出余量。
+ * UV = 28 V：48 V 标称的 58%。
+ *   ⚠ 台架 30.7 V 供电，28 V 阈值留 2.7 V（9%）余量，编码器校准/加减速
+ *   的母线跌落不再误触欠压（原 30 V 只剩 0.7 V 余量，一跑就报 0x0080）。
+ *   注意：这牺牲了"48V 系统欠压保护点"，正规 48 V 供电时建议改回 30 V。
  * 两个阈值都带 20 ms 消抖：母线在开关瞬间会有几十微秒的跌落/尖峰，
  * 单拍判据必然误跳。
  */
 #define BSP_VBUS_OV_TRIP         (60.0f)
-#define BSP_VBUS_UV_TRIP         (30.0f)
+#define BSP_VBUS_UV_TRIP         (28.0f)
 #define BSP_VBUS_DEBOUNCE        (20U)      /* 连续 20 次 @1 kHz = 20 ms */
 #define BSP_VBUS_BLANK           (300U)     /* 上电 300 ms 内不判：分压/ADC 未稳 */
 
@@ -198,6 +198,10 @@ float             BspServo_GetThetaCached(void);
  * 而折叠只能保证 ±π 内正确。用多圈角后 pos_ref 可以直接给绝对目标。 */
 float             BspServo_GetThetaMulti(void);
 int64_t           BspServo_GetPosSum(void);
+/* 多圈角零点偏移 s_tm_base（上电第一拍单圈角）。theta_multi = s_tm_base +
+ * s_pos_sum·(2π/2^21)；外部协议若用 enc_sum 基准给目标，须加这个偏移才能
+ * 和 theta_multi（MIT/位置环控制基准）对齐（2026-11-25 修复 MIT 45mrad 偏移）。 */
+float             BspServo_GetThetaBase(void);
 float             BspServo_GetOmegaMech(void);
 /* 未滤波单拍角速度（rad/s）。机械辨识（谐振/惯量/齿槽）专用：
  * 常规测速是 8 拍累计 + 95 Hz 低通，测不到 100 Hz 以上的谐振。 */
@@ -213,6 +217,8 @@ uint32_t          BspServo_GetEncoderRaw(void);
 void              BspServo_InitEncCalPin(void);
 void              BspServo_SetEncCalEn(uint8_t en);
 uint8_t           BspServo_ReadEncReg(uint16_t addr);
+void              BspServo_WriteEncReg(uint16_t addr, uint8_t data);
+uint8_t           BspServo_BurnEeprom(void);   /* 返回 1 = 芯片回 0x55 确认 */
 uint8_t           BspServo_GetEncoderStatus(void);
 /* 编码器故障现场打包：b0..2 status、b3..5 连续错误数、b6..7 连续跳变数。
  * 置 BSP_FAULT_ENCODER 的两条路径（帧内容坏 vs 跳变）靠它区分。 */

@@ -64,6 +64,9 @@ typedef struct {
     uint32_t elapsed_ms;
     uint8_t  chip_status;    /* 最后一次读到的 0x113[7:6]：0/1/2/3 */
     uint8_t  ol_mode;        /* 1 = 闭环起不来，已切开环拖动完成本次校准 */
+    uint8_t  auto_cal_freq;  /* 0x00E[3:1] 自校准转速区间（出厂默认 0x03=400~800rpm）。
+                              * 诊断 chip_status=2 用：若被 EEPROM 写坏成别的值，
+                              * 700rpm 会落在区间外 → 芯片立即判失败。 */
     EncCalErr err;
 } EncCalResult;
 

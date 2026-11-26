@@ -363,6 +363,52 @@ uint8_t BspServo_ReadEncReg(uint16_t addr)
     return rx[2];
 }
 
+/* 单字节写寄存器（MT6835 手册 7.6.5）：C3~C0=0110 | A11~A0 | DI7~DI0。 */
+void BspServo_WriteEncReg(uint16_t addr, uint8_t data)
+{
+    uint8_t tx[3];
+    uint8_t rx[3] = { 0U, 0U, 0U };
+    uint32_t t0;
+
+    tx[0] = (uint8_t)(0x60U | (uint8_t)((addr >> 8) & 0x0FU));
+    tx[1] = (uint8_t)(addr & 0xFFU);
+    tx[2] = data;
+
+    t0 = HAL_GetTick();
+    while ((s_spi_busy != 0U) && ((HAL_GetTick() - t0) < 5U)) { }
+
+    s_spi_busy = 1U;
+    EncCsLow();
+    (void)HAL_SPI_TransmitReceive(&hspi1, tx, rx, 3U, 10U);
+    EncCsHigh();
+    s_spi_busy = 0U;
+}
+
+/* 烧录 EEPROM（MT6835 手册 7.6.6）：C3~C0=1100，A11~A0=0。
+ * 芯片正确接收会在 MISO 返回 0x55。所有 EEPROM 映射寄存器一起写入。
+ * 烧录后必须等 >6 s 再断电，否则可能失败。返回 1 = 收到 0x55 确认。 */
+uint8_t BspServo_BurnEeprom(void)
+{
+    uint8_t tx[3];
+    uint8_t rx[3] = { 0U, 0U, 0U };
+    uint32_t t0;
+
+    tx[0] = 0xC0U;
+    tx[1] = 0x00U;
+    tx[2] = 0x00U;
+
+    t0 = HAL_GetTick();
+    while ((s_spi_busy != 0U) && ((HAL_GetTick() - t0) < 5U)) { }
+
+    s_spi_busy = 1U;
+    EncCsLow();
+    (void)HAL_SPI_TransmitReceive(&hspi1, tx, rx, 3U, 10U);
+    EncCsHigh();
+    s_spi_busy = 0U;
+
+    return (rx[2] == 0x55U) ? 1U : 0U;
+}
+
 HAL_StatusTypeDef BspServo_Init(void)
 {
     HAL_StatusTypeDef st;
@@ -1201,6 +1247,7 @@ float BspServo_GetThetaCached(void) { return s_theta; }
 /* 多圈机械角（rad，不折叠）。位置环用它替代单圈 theta_m，
  * 从而支持大范围绝对定位（±π 之外的移动不再被折叠到最近等价点）。 */
 float BspServo_GetThetaMulti(void) { return s_theta_multi; }
+float BspServo_GetThetaBase(void)   { return s_tm_base; }
 
 /*
  * 只读：相对上电点的累积脉冲（多圈），除以 BSP_ENC_COUNTS 即圈数。
