@@ -440,9 +440,31 @@ static uint32_t    s_rx_tick;
 static uint16_t    s_cw_last;
 static int8_t      s_mode_last;
 
-/* pulse ↔ 弧度。位置环已经是**输出端**口径（ACT_GEAR_RATIO 在固件内部折算），
- * 所以 0x607A/0x6064 的 pulse 按输出端换算即可，不需要再乘减速比。
- * ⚠ 速度通道相反：速度环是**电机端**，0x60FF 要 × 减速比才是内部 rad/s。 */
+/* ================= 三环口径约定（务必读，否则会静默偏 9 倍）=================
+ *
+ * 减速比 ACT_GEAR_RATIO = 9（app_param.h:52，与 can_proto.c 的 CAN_GEAR_RATIO
+ * 有 _Static_assert 强制相等）。0x2000 脉冲当量是**输出端**每圈脉冲数（默认 10000）。
+ *
+ * 三个环的**坐标口径**并不统一（2026-11-26 逐文件核对 servo_isr.c 确认）：
+ *
+ *   环         口径          依据（servo_isr.c）
+ *   位置环     输出端 rad     pos_coord_now() = theta_multi / ACT_GEAR_RATIO  (L1398)
+ *   速度环     电机端 rad/s   速度给定直接对 BspServo_GetOmegaMech() 做差（电机端）
+ *   MIT 环     电机端 rad     ep = s_mit_p_shape - theta_multi，theta_multi 是电机端多圈角 (L2788)
+ *
+ * 历史：远程 8f25e49「位置环输出端口径重构」把位置环坐标从电机端改成了输出端
+ * （Vmax/Amax/Errmax ÷9，Kp 不变）；速度环、MIT 环**没有改**，仍是电机端。
+ *
+ * 因此 pulse（输出端）换算到内部口径时：
+ *   位置 0x607A/0x6064  → 输出端 rad，**直接**按 2π/ppr，不乘减速比；
+ *   速度 0x60FF/0x606C  → 输出端 pulse/s，先 2π/ppr 转输出端 rad/s，再 **× 减速比** 到电机端；
+ *   MIT   q/dq          → 输出端，先 2π/ppr，再 **× 减速比** 到电机端；
+ *   MIT   tau           → 输出端 mN·m，×0.001 转 N·m 再 **÷ 减速比** 到电机端；
+ *   MIT   kp/kd         → 已是电机端 N·m/rad，/1000 还原，不做折算。
+ *
+ * 反馈（6064/606C 注入）反过来：编码器给的是电机端（theta_multi/omega_mech），
+ * 两者都要 ÷ 减速比 才得到输出端 pulse。
+ */
 #define TWO_PI_F    (6.2831853f)
 
 static float pulse2rad(int32_t p)
