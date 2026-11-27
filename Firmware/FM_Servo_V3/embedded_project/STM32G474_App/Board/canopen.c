@@ -264,9 +264,16 @@ static void sdo_abort(uint16_t idx, uint8_t sub, uint32_t code)
     (void)canopen_send(COB_SDO_TX, r, 8u);
 }
 
+static uint32_t s_rx_tick;   /* 通信保活计时（SDO/RPDO 共用，见 drive_apply） */
+
 static void sdo_handle(const uint8_t *d, uint8_t dlc)
 {
     const uint8_t  ccs = (uint8_t)(d[0] >> 5);            /* 1=下载 2=上传 3/4=分段 */
+    /* 【2026-11-27 修正】通信超时原先只在 RPDO 分支刷新 s_rx_tick，纯 SDO 通讯
+     * 时它永远是 0 → HAL_GetTick()-0 恒 >500ms → 使能后 1ms 就被 drive_apply
+     * 的"通信超时"强制停机（实测状态字 0x0227 → 0x0240）。任何 SDO 读写都
+     * 是主站在线的证据，都要刷新这个计时。 */
+    s_rx_tick = HAL_GetTick();
     const uint16_t idx = (uint16_t)(d[1] | ((uint16_t)d[2] << 8));
     const uint8_t  sub = d[3];
     const od_item_t *it;
@@ -382,11 +389,25 @@ static void pdo_send_tpdo1(void)
 {
     uint8_t b[8];
     uint8_t n;
+    static uint16_t last_sw = 0xFFFFu;
+    static int32_t  last_pos = 0;
+    static uint8_t  first = 1u;
 
     if ((od_1800_cob & 0x80000000UL) != 0u) { return; }
+    /* type=255 异步 TPDO：只在映射数据变化时发。
+     * 【2026-11-27 修正】原来每 1 ms 无条件发，实测 864 帧/秒占满总线，
+     * 挤掉 SDO 应答。现在状态字变化、或位置变化 >1 pulse 才发；静止零流量。 */
+    if ((first == 0u) && (od_6041_sw == last_sw) &&
+        (od_6064_pos >= last_pos - 1) && (od_6064_pos <= last_pos + 1)) {
+        return;
+    }
     n = pdo_pack(b, od_1A00_map, od_1A00_nmap);
     if (n != 0u) {
-        (void)canopen_send((uint16_t)(od_1800_cob & 0x7FFu), b, n);
+        if (canopen_send((uint16_t)(od_1800_cob & 0x7FFu), b, n) != 0u) {
+            first = 0u;
+            last_sw = od_6041_sw;
+            last_pos = od_6064_pos;
+        }
     }
 }
 
@@ -436,7 +457,7 @@ static cia_state_t s_state = ST_NOT_READY;
  * 没这条的后果实测过：主站停发后从站一直 armed=True，串口 Disarm 也被
  * 状态机每拍的"重新使能"顶掉，只能软复位才停得住 —— 现场就是主站崩了电机还在通电保持。 */
 #define CANOPEN_RX_TMO_MS   (500u)
-static uint32_t    s_rx_tick;
+/* s_rx_tick 定义已上移到 sdo_handle 之前（SDO 与 RPDO 共用） */
 static uint16_t    s_cw_last;
 static int8_t      s_mode_last;
 
@@ -479,15 +500,27 @@ static int32_t rad2pulse(float r)
 
 static uint8_t cia_cmd(uint16_t cw)
 {
-    const uint8_t b1 = (uint8_t)((cw >> 1) & 1u);
-    const uint8_t b2 = (uint8_t)((cw >> 2) & 1u);
-    const uint8_t b3 = (uint8_t)((cw >> 3) & 1u);
+    /* CiA 402 §7.2.2 控制字命令解码。
+     *
+     * 位定义（控制字 0x6040）：
+     *   bit0 = Switch on，bit1 = Enable voltage，bit2 = Quick stop，bit3 = Enable operation
+     *
+     * 【2026-11-27 修正】原实现把 bit1 当 Quick stop、bit2 当 Enable voltage，
+     * 导致标准序列全部错位：
+     *   0x06 (Shutdown)  → 判成 cmd 4 (Switch on)  → 在 SWITCH_ON_DISABLED 下无分支，卡死
+     *   0x07 (Switch on) → 判成 cmd 5 (Enable op)  → 0x40 直接跳到 0x27，跳过 0x21/0x23
+     * 现象是"主站发完使能序列，状态字不动"或"一步跳到 Operation enabled"，
+     * 第三方主站会报状态机超时。下面是标准判据，按位顺序逐级收紧。 */
+    const uint8_t sw_on  = (uint8_t)((cw >> 0) & 1u);   /* bit0 */
+    const uint8_t en_vol = (uint8_t)((cw >> 1) & 1u);   /* bit1 */
+    const uint8_t qs     = (uint8_t)((cw >> 2) & 1u);   /* bit2 */
+    const uint8_t en_op  = (uint8_t)((cw >> 3) & 1u);   /* bit3 */
 
-    if ((b1 == 0u) && (b2 == 0u)) { return 1u; }   /* Disable voltage */
-    if ((b1 == 0u) && (b2 == 1u)) { return 2u; }   /* Quick stop */
-    if ((b1 == 1u) && (b2 == 0u)) { return 3u; }   /* Shutdown */
-    if (b3 == 0u)                 { return 4u; }   /* Switch on */
-    return 5u;                                     /* Enable operation */
+    if (en_vol == 0u) { return 1u; }   /* Disable voltage ：bit1=0            (0x00) */
+    if (qs     == 0u) { return 2u; }   /* Quick stop      ：bit1=1, bit2=0    (0x02) */
+    if (sw_on  == 0u) { return 3u; }   /* Shutdown        ：bit0=0            (0x06) */
+    if (en_op  == 0u) { return 4u; }   /* Switch on       ：bit3=0            (0x07) */
+    return 5u;                         /* Enable operation：全 1              (0x0F) */
 }
 
 static void cia_step(uint16_t cw)
@@ -869,6 +902,16 @@ uint16_t Canopen_MasterRxBad(void) { return (s_m_tpdo == 0u) ? 1u : 0u; }
 
 /* ===================== 对外接口 ===================== */
 
+uint8_t Canopen_SendRaw(uint16_t cob, const uint8_t *buf, uint8_t len)
+{
+    /* 直接转发到内部实现，保证帧格式（经典帧、BRS 关）只有一处定义。
+     * 给 canopen_bridge.c 的主站用；从站自身的收发路径不受影响。 */
+    if ((buf == 0) || (len > 8u)) {
+        return 0u;
+    }
+    return canopen_send(cob, buf, len);
+}
+
 void Canopen_Init(void)
 {
     s_nmt = NMT_BOOTUP;
@@ -926,8 +969,11 @@ void Canopen_Task1ms(void)
         }
     }
 
-    /* Heartbeat：0x1017 周期（ms），0 = 关闭 */
-    if (s_nmt != NMT_BOOTUP) {
+    /* Heartbeat：0x1017 周期（ms），0 = 关闭。
+     * 【2026-11-27 修正】原来 `++s_hb_ms >= od_1017_hb_ms` 在 0x1017=0 时
+     * 恒成立（1>=0），等于"每 1 ms 发一次心跳"——实测把总线刷到 830 帧/秒，
+     * 挤掉 SDO 应答。补 `!=0` 门控，0 才是真正的关闭。 */
+    if ((s_nmt != NMT_BOOTUP) && (od_1017_hb_ms != 0u)) {
         if (++s_hb_ms >= od_1017_hb_ms) {
             uint8_t b[1];
             s_hb_ms = 0u;

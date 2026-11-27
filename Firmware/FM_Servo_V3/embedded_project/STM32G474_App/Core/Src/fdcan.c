@@ -40,23 +40,23 @@ void MX_FDCAN1_Init(void)
   hfdcan1.Instance = FDCAN1;
   /* 2026-11-22 CAN FD 协议落地（见 Agnet/X72关节模组_CANFD协议_工程落地_v1.1.html）
    *
-   * 时钟：FDCAN 源 = PCLK1 = 170 MHz。手册上限 80 MHz，这里 DIV2 → 85 MHz
-   *       （超 6%，先用后评估；若要合规需把 PLLQ 配到 80，SYSCLK 降 160）。
-   * 位定时：85 MHz ÷ 5 = 17 MHz，17 TQ → 1 Mbit/s（标称）
-   *         85 MHz ÷ 1 = 85 MHz，17 TQ → 5 Mbit/s（数据，BRS）
-   *         两段都是 1+12+4 = 17 TQ，采样点 76.5%，SJW=3。
-   * 原配置：DIV1（170 MHz）、FD_NO_BRS、17/7/2 → 只有 1 Mbit/s 且数据段不加速。 */
+   * 时钟：FDCAN 源 = PCLK1 = 170 MHz。
+   * 位定时（2026-11-27 降速）：Prescaler 34 × (1+7+2)=10 TQ
+   *   → 170 MHz ÷ 340 = 500 kbit/s，采样点 80%。
+   * 降速原因：4 节点菊花链用杜邦线/手拧线实测 1 Mbit/s 下随机丢帧
+   * （"谁在线随机变"），500k 位时间翻倍、对接触电阻/反射容忍度大增。
+   * 经典 CAN 帧（CANopen 用）只走标称段，DataPrescaler 不参与。 */
   hfdcan1.Init.ClockDivider = FDCAN_CLOCK_DIV1;
   hfdcan1.Init.FrameFormat = FDCAN_FRAME_FD_NO_BRS;
   hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
   hfdcan1.Init.AutoRetransmission = DISABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
-  hfdcan1.Init.NominalPrescaler = 17;
+  hfdcan1.Init.NominalPrescaler = 34;
   hfdcan1.Init.NominalSyncJumpWidth = 1;
   hfdcan1.Init.NominalTimeSeg1 = 7;
   hfdcan1.Init.NominalTimeSeg2 = 2;
-  hfdcan1.Init.DataPrescaler = 17;
+  hfdcan1.Init.DataPrescaler = 34;
   hfdcan1.Init.DataSyncJumpWidth = 1;
   hfdcan1.Init.DataTimeSeg1 = 7;
   hfdcan1.Init.DataTimeSeg2 = 2;
