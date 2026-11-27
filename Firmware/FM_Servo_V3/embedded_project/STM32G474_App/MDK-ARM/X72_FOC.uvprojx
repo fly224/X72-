@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32G474xx,ARM_MATH_CM4</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32G4xx_HAL_Driver/Inc;../Drivers/STM32G4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32G4xx/Include;../Drivers/CMSIS/Include;../Board;../../../simulink_code_gen</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32G4xx_HAL_Driver/Inc;../Drivers/STM32G4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32G4xx/Include;../Drivers/CMSIS/Include;../../../app;../../../app/Identify;../../../motor_control;../../../communication/protocol;../../../communication/callback;../../../board_public/flash_db;../../../board_public/system_manage;../../../simulink_code_gen</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -699,12 +699,12 @@
             <File>
               <FileName>bsp_servo.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/bsp_servo.c</FilePath>
+              <FilePath>../../../board_public/system_manage/bsp_servo.c</FilePath>
             </File>
             <File>
               <FileName>servo_isr.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/servo_isr.c</FilePath>
+              <FilePath>../../../motor_control/servo_isr.c</FilePath>
             </File>
             <File>
               <FileName>three_loop_deploy.c</FileName>
@@ -714,122 +714,122 @@
             <File>
               <FileName>telemetry_tx.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/telemetry_tx.c</FilePath>
+              <FilePath>../../../communication/callback/telemetry_tx.c</FilePath>
             </File>
             <File>
               <FileName>uart_link.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/uart_link.c</FilePath>
+              <FilePath>../../../communication/protocol/uart_link.c</FilePath>
             </File>
             <File>
               <FileName>motion_profile.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/motion_profile.c</FilePath>
+              <FilePath>../../../motor_control/motion_profile.c</FilePath>
             </File>
             <File>
               <FileName>pos_loop.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/pos_loop.c</FilePath>
+              <FilePath>../../../motor_control/pos_loop.c</FilePath>
             </File>
             <File>
               <FileName>vel_profile.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/vel_profile.c</FilePath>
+              <FilePath>../../../motor_control/vel_profile.c</FilePath>
             </File>
             <File>
               <FileName>servo_cmd.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/servo_cmd.c</FilePath>
+              <FilePath>../../../motor_control/servo_cmd.c</FilePath>
             </File>
             <File>
               <FileName>can_proto.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/can_proto.c</FilePath>
+              <FilePath>../../../communication/protocol/can_proto.c</FilePath>
             </File>
             <File>
               <FileName>canopen.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/canopen.c</FilePath>
+              <FilePath>../../../communication/protocol/canopen.c</FilePath>
             </File>
             <File>
               <FileName>canopen.h</FileName>
               <FileType>5</FileType>
-              <FilePath>../Board/canopen.h</FilePath>
+              <FilePath>../../../communication/protocol/canopen.h</FilePath>
             </File>
             <File>
               <FileName>motor_ident.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/motor_ident.c</FilePath>
+              <FilePath>../../../app/Identify/motor_ident.c</FilePath>
             </File>
             <File>
               <FileName>cur_step.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/cur_step.c</FilePath>
+              <FilePath>../../../app/Identify/cur_step.c</FilePath>
             </File>
             <File>
               <FileName>deadband_comp.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/deadband_comp.c</FilePath>
+              <FilePath>../../../motor_control/deadband_comp.c</FilePath>
             </File>
             <File>
               <FileName>param_store.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/param_store.c</FilePath>
+              <FilePath>../../../board_public/flash_db/param_store.c</FilePath>
             </File>
             <File>
               <FileName>motor_rl_ident.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/motor_rl_ident.c</FilePath>
+              <FilePath>../../../app/Identify/motor_rl_ident.c</FilePath>
             </File>
             <File>
               <FileName>encoder_cal.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/encoder_cal.c</FilePath>
+              <FilePath>../../../app/Identify/encoder_cal.c</FilePath>
             </File>
             <File>
               <FileName>actuator.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/actuator.c</FilePath>
+              <FilePath>../../../app/Identify/actuator.c</FilePath>
             </File>
             <File>
               <FileName>fric_cal.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/fric_cal.c</FilePath>
+              <FilePath>../../../app/Identify/fric_cal.c</FilePath>
             </File>
             <File>
               <FileName>mech_ident.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/mech_ident.c</FilePath>
+              <FilePath>../../../app/Identify/mech_ident.c</FilePath>
             </File>
             <File>
               <FileName>motor_flux_ident.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/motor_flux_ident.c</FilePath>
+              <FilePath>../../../app/Identify/motor_flux_ident.c</FilePath>
             </File>
             <File>
               <FileName>cog_ff.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/cog_ff.c</FilePath>
+              <FilePath>../../../motor_control/cog_ff.c</FilePath>
             </File>
             <File>
               <FileName>enc_comp.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/enc_comp.c</FilePath>
+              <FilePath>../../../motor_control/enc_comp.c</FilePath>
             </File>
             <File>
               <FileName>mavlink_common.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/mavlink_common.c</FilePath>
+              <FilePath>../../../communication/protocol/mavlink_common.c</FilePath>
             </File>
             <File>
               <FileName>app_param.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/app_param.c</FilePath>
+              <FilePath>../../../app/app_param.c</FilePath>
             </File>
             <File>
               <FileName>mavlink_host.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Board/mavlink_host.c</FilePath>
+              <FilePath>../../../communication/protocol/mavlink_host.c</FilePath>
             </File>
           </Files>
         </Group>
