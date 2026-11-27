@@ -10,14 +10,31 @@
 
 ---
 
-## [Unreleased]
+## [1.1.0] - 2026-11-27
+
+### 新增
+
+- **编码器角度谐波补偿系数落盘持久化**（`enc_comp.c` / `param_store.c`）。16 阶谐波
+  系数（n_harm + en + a[16] + b[16]）存到独立 Flash 页 `0x0807D000`，存参 action=1 时
+  落盘、上电自动加载。实测软复位后系数完整恢复，2 次/转转速谐波 3.52 → 1.23 rpm（−65%）
+- **CANopen 从站 + 桥接**（`canopen.c` / `canopen_bridge.c`，2026-11-26 合并）。CiA402
+  状态机、SDO、心跳、TPDO；`canopen_bridge` 为 A 板主站网关（预留，未启用）
+- **代码按 FM_Servo_V3 分层架构重组**（`refactor`）：26 个模块从 Board 平铺移到
+  `app/`（应用+辨识）、`motor_control/`（三环+命令+补偿）、`communication/`
+  （MAVLink/CAN/CANopen）、`board_public/`（BSP+存储），编译 0 Error、Code 不变
 
 ### 变更
 
-- **母线保护阈值改为 OV 60 V / UV 30 V**（`bsp_servo.h`，原 58 V / 18 V）。
-  48 V 标称的 1.25 倍 / 62.5%，对应 100 V MOS 与 63 V 母线电容。
-  注意：台架若仍是 30.8 V 供电，UV 只剩 0.8 V 余量，带载加减速易误报 `0x0080`；
-  空载 200 rpm 急加急减实测母线 30.73~30.77 V、无故障（`Agnet/vbus_stress.py`）
+- **母线保护阈值改为 OV 60 V / UV 28 V**（`bsp_servo.h`，原 58 V / 18 V，中间一度 30 V）。
+  48 V 标称的 1.25 倍 / 58%；台架 30.7 V 供电下留 9% 余量，编码器校准/加减速母线跌落
+  不再误触欠压（原 30 V 只剩 0.7 V 余量）。注意：正规 48 V 供电时建议改回 30 V
+- **MIT kd 默认 0.10 → 0.30**（`app_param.c`）。减速比 9 后输出端阻尼比 = 电机端/3，
+  kd=0.10 时输出端 ζ=0.31 欠阻尼，目标偏移过冲触发假超速 fault=0x0020
+- **编码器校准拖动改回速度闭环 + 转速 700 rpm + AUTO_CAL_FREQ 自愈**（`encoder_cal.c`）。
+  开环 I-f 拖动失步（40~214 rpm 进不了区间 + 次生 0x0002）；自愈把被写坏的
+  0x00E[3:1]（0x04=200~400rpm）写回 0x03 并烧 EEPROM
+- **参数辨识 id 扫描加大**（`motor_flux_ident.c`）：FI_ID_STEP 3→5 A、FI_ID_SUB 2→3 A、
+  FI_R2_MIN 0.90→0.85，解决 vq-id 斜率 SNR 不足导致回归退化 err=6
 
 ### 修复
 
@@ -53,10 +70,10 @@
 - 5/7 次谐波抑制：开启后 6 次频率自激（RMS 0.36 → 3.33 A），不可用；需先加 `harm_kp/harm_ki` 槽位
 - 齿槽前馈补偿率仅 23.7%：反推相位差约 42°，需加在线相位微调接口后扫描确认
 - `30000 READ_PARAM` 无应答：影响上位机读参数表
-- CiA402 八态机、EMCY / SDO / FB_FAST / CMD_MOTION 未实现
-- 编码器自校准（^）卡在 MT6835 侧，`chip_status=1`
+- CiA402 状态机已实现（含 SDO 上传/下载、控制字位解码修正），EMCY / FB_FAST / CMD_MOTION 仍未实现
+- 编码器自校准（^）失败（chip_status=2）：已排除转速/区间/磁场报警，定位为硬件磁铁安装问题（AG 间隙 1.0~3.0 mm / Bpk 磁场 30~1000 mT / 偏心 ≤0.3 mm 超 MT6835 手册范围），软件侧已无可调项；软件谐波补偿 30098 可部分替代（2 次/转 −50~65%）
 - **编码器 CRC 校验与 SPI 自愈只在静止状态验证过**，尚未做长时间转动/温升复测
-- 减速比 `CAN_GEAR_RATIO` 是编译常量，未进 Flash 参数区
+- 减速比 9 是编译常量（ACT_GEAR_RATIO / CAN_GEAR_RATIO，有编译期静态断言），未进 Flash 参数区
 
 ---
 

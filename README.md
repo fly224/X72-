@@ -5,11 +5,11 @@
 STM32G474 谐波关节模组的嵌入式固件：三环 FOC + 四种控制模式，调试走 MAVLink v2，
 总线走 CAN FD。
 
-- **固件**：`Firmware/FM_Servo_V3/embedded_project/STM32G474_App`（Board 层 20 个模块，约 14800 行）
+- **固件**：`Firmware/FM_Servo_V3`（app / motor_control / communication / board_public 分层，26 个模块，约 1.7 万行）
 - **硬件资料**：`Hardware/Netlist`（PG_X72_CAN 网表、引脚映射、核对报告）
 - **上位机与工具**：`Agnet`（下发脚本、频谱分析、工程文档）
 
-当前版本：**v1.0.0**（2026-11-22 首次入库）。变更历史见 [CHANGELOG.md](CHANGELOG.md)，
+当前版本：**v1.1.0**（2026-11-27）。变更历史见 [CHANGELOG.md](CHANGELOG.md)，
 版本号与发布规则见 [docs/版本管理规范.md](docs/版本管理规范.md)。
 
 ---
@@ -22,7 +22,7 @@ STM32G474 谐波关节模组的嵌入式固件：三环 FOC + 四种控制模式
 | 逆变 | 三相，20 kHz 中心对齐（TIM1，ARR=4250），死区 294 ns |
 | 电流采样 | 双电阻：U 相（OPA1/ADC1）、W 相（OPA2/ADC2），V 相由 Iu+Iw 重构 |
 | 编码器 | MT6835 磁编，2²¹ counts/rev（1 count = 3.0 µrad） |
-| 电机 | 14 极对 PMSM，减速比 10:1 |
+| 电机 | 14 极对 PMSM，减速比 9:1 |
 | 母线 | 设计 48 V（当前台架实测 30.8 V） |
 | 通信 | USART1 @921600（MAVLink）、FDCAN1（CAN FD，SIT1042 收发器） |
 | 安全 | IWDG 250 ms；无硬件 STO、无抱闸驱动 |
@@ -168,34 +168,46 @@ L1 协议按 `Agnet/X72关节模组_CANFD协议_工程落地_v1.1.html` 实现�
 ## 代码结构
 
 ```
-Firmware/FM_Servo_V3/embedded_project/STM32G474_App/
-├── Core/             CubeMX 生成的 main / 中断向量
-├── Board/            全部业务代码（20 模块，14803 行）
-│   ├── bsp_servo.c        BSP：ADC / 编码器 / 温度 / 故障 / 保护
-│   ├── servo_isr.c        20 kHz ISR：三环调度、模式分发、保护（3691 行）
-│   ├── pos_loop.c         位置环（纯 P + 背算抗饱和）
-│   ├── motion_profile.c   梯形 / S 曲线规划
-│   ├── vel_profile.c      速度斜坡
-│   ├── cog_ff.c           齿槽前馈（查表 + 速度门控 + 零点校验）
-│   ├── deadband_comp.c    死区补偿（按相电流方向 + 转速门控）
-│   ├── enc_comp.c         编码器角度 16 阶谐波补偿
-│   ├── motor_ident.c      Z 电角度对齐 + 极对数
-│   ├── motor_flux_ident.c 磁链 / Kt
-│   ├── motor_rl_ident.c   R / L
-│   ├── encoder_cal.c      编码器自校准
-│   ├── mech_ident.c       机械四项：扫频 / 摩擦 / 惯量 / 齿槽（802 行）
-│   ├── fric_cal.c         摩擦两点标定
-│   ├── cur_step.c         电流阶跃记录（辨识 / 诊断）
-│   ├── actuator.c         辨识期间的开环执行器
-│   ├── servo_cmd.c        命令装配 + 动作分发 + 联锁（1342 行）
-│   ├── app_param.c        模式 / 控制字 / 参数缓存
-│   ├── param_store.c      Flash 参数区（PS_VERSION 版本化）
-│   ├── mavlink_common.c   帧编解码 + s_meta
-│   ├── mavlink_host.c     消息分发（1320 行）
-│   ├── telemetry_tx.c     遥测组帧
-│   ├── uart_link.c        USART 收发 + ORE 处理
-│   └── can_proto.c        CAN FD：L1 协议 + 测试支架 + bus-off 恢复（1248 行）
-└── MDK-ARM/          Keil 工程（X72_FOC.uvprojx）
+Firmware/FM_Servo_V3/
+├── app/                        应用层
+│   ├── Identify/               辨识标定（8 模块）
+│   │   ├── motor_ident.c       Z 电角度对齐 + 极对数
+│   │   ├── motor_flux_ident.c  磁链 / Kt
+│   │   ├── motor_rl_ident.c    R / L
+│   │   ├── encoder_cal.c       编码器自校准
+│   │   ├── mech_ident.c        机械四项：扫频 / 摩擦 / 惯量 / 齿槽
+│   │   ├── fric_cal.c          摩擦两点标定
+│   │   ├── cur_step.c          电流阶跃记录（辨识 / 诊断）
+│   │   └── actuator.c          辨识期间的开环执行器
+│   └── app_param.c             模式 / 控制字 / 参数缓存
+├── motor_control/              电机控制层（8 模块）
+│   ├── servo_isr.c             20 kHz ISR：三环调度、模式分发、保护
+│   ├── servo_cmd.c             命令装配 + 动作分发 + 联锁
+│   ├── pos_loop.c              位置环（纯 P + 背算抗饱和）
+│   ├── motion_profile.c        梯形 / S 曲线规划
+│   ├── vel_profile.c           速度斜坡
+│   ├── cog_ff.c                齿槽前馈（查表 + 速度门控 + 零点校验）
+│   ├── deadband_comp.c         死区补偿（按相电流方向 + 转速门控）
+│   └── enc_comp.c              编码器角度 16 阶谐波补偿
+├── communication/              通信层
+│   ├── protocol/               协议（6 模块）
+│   │   ├── mavlink_common.c    帧编解码 + s_meta
+│   │   ├── mavlink_host.c      消息分发
+│   │   ├── uart_link.c         USART 收发 + ORE 处理
+│   │   ├── can_proto.c         CAN FD：L1 协议 + bus-off 恢复
+│   │   ├── canopen.c           CANopen 从站（CiA402）
+│   │   └── canopen_bridge.c    CANopen 桥接（A 板主站，预留）
+│   └── callback/
+│       └── telemetry_tx.c      遥测组帧
+├── board_public/               板级公共
+│   ├── flash_db/
+│   │   └── param_store.c       Flash 参数区（PS_VERSION 版本化）
+│   └── system_manage/
+│       └── bsp_servo.c         BSP：ADC / 编码器 / 温度 / 故障 / 保护
+├── embedded_project/
+│   └── STM32G474_App/          工程壳（Core + MDK-ARM + Drivers）
+├── SIL_project/                SIL 测试（预留）
+└── simulink_code_gen/          Simulink 代码生成
 ```
 
 ---
@@ -254,7 +266,7 @@ UV4.exe -f X72_FOC.uvprojx -j0 -o flash.log
 | `SERVO_MIT_KP_MAX` / `KD_MAX` | 2000 / 50（门卫 5000 / 100，**回读的是门卫值**） | `servo_isr.c` |
 | MIT 整形 | 15 rad/s / 180 rad/s² | `servo_isr.c` |
 | 死区 | 294 ns | `deadband_comp.h` |
-| `CAN_GEAR_RATIO` | 10（编译常量，未进 Flash） | `can_proto.c` |
+| `CAN_GEAR_RATIO` | 9（编译常量，未进 Flash） | `can_proto.c` |
 | 测速低通 | α=0.35（≈171 Hz） | `bsp_servo.h` |
 
 ---
@@ -271,7 +283,10 @@ UV4.exe -f X72_FOC.uvprojx -j0 -o flash.log
    `harm_kp/harm_ki` 没有 30082 槽位，无法在线整定。
 3. **齿槽前馈只补掉 23.7%**。同一转速下关 0.609 A / 开 0.465 A，反推相位差约 42°。
    表本身正确（幅值与关断实测吻合），问题在 phase 标定或运行时相位。
-4. **编码器自校准（^）卡在芯片侧**，`chip_status=1`，全工程无 MT6835 配置寄存器写入。
+4. **编码器自校准（^）失败（chip_status=2）**。转速（pp 0.14%）、区间（AUTO_CAL_FREQ=0x03）、
+   磁场强度（STATUS=0）均已排除，芯片在 CAL_EN 拉高后约 1.7 s 即判失败；定位为硬件磁铁
+   安装问题（AG 间隙 1.0~3.0 mm / Bpk 磁场 30~1000 mT / 偏心 ≤0.3 mm 超 MT6835 手册范围）。
+   软件侧已无可调项；软件谐波补偿（30098）可部分替代，2 次/转谐波 −50~65%。
 5. **`30000 READ_PARAM` 读不到应答**（46 B / 192 B 请求都不回），写入类 30082 正常。
    影响上位机"读参数表"，不影响盲写。
 6. **CiA402 只做了状态字映射**（`can_cia402_sw`），八态机与控制字语义未实现。
