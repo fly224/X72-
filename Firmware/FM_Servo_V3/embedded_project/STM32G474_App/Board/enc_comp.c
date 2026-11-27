@@ -2,6 +2,7 @@
  * enc_comp.c —— 编码器角度误差的软件补偿（实现见 enc_comp.h 的说明）
  */
 #include "enc_comp.h"
+#include "param_store.h"
 
 #include <math.h>
 #include <string.h>
@@ -105,4 +106,24 @@ float EncComp_Eval(float theta_m)
     i = (uint16_t)x;
     f = x - (float)i;
     return s_lut[i] + (f * (s_lut[i + 1U] - s_lut[i]));
+}
+
+uint8_t EncComp_LoadFromFlash(void)
+{
+    float   a[ENC_COMP_MAX_H];
+    float   b[ENC_COMP_MAX_H];
+    uint8_t n = 0U, en = 0U;
+
+    if (ParamStore_LoadEncComp(a, b, &n, &en) == 0U) { return 0U; }
+    if (EncComp_SetHarm(n, a, b) == 0U)             { return 0U; }
+    EncComp_SetEnable(en);
+    return 1U;
+}
+
+uint8_t EncComp_SaveToFlash(void)
+{
+    /* 无有效系数时跳过（s_n=0 等价于关闭，没必要往 Flash 写一份全 0） */
+    if (s_n == 0U) { return 0U; }
+
+    return ParamStore_SaveEncComp(s_a, s_b, s_n, s_en);
 }

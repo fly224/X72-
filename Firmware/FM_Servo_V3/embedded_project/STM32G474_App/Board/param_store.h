@@ -23,6 +23,7 @@
 #define PARAM_STORE_H
 
 #include <stdint.h>
+#include "enc_comp.h"   /* ENC_COMP_MAX_H：编码器谐波补偿系数数组大小 */
 
 #define PS_FLASH_ADDR    (0x0807F000u)
 #define PS_MAGIC         (0x58373250u)   /* 'X''7''2''P' 小端 */
@@ -149,5 +150,26 @@ uint8_t ParamStore_LoadCog(int16_t *tab, uint16_t *n_bins,
                            uint8_t *en);
 /* 1 = 页内有通过 CRC 的表 */
 uint8_t ParamStore_HasCog(void);
+
+/* ---------------- 编码器角度谐波补偿系数（单独一页） ----------------
+ *
+ * 为什么单独一页：16 阶 × 2 × f32 = 128 B 系数 + 头，塞进 ParamBlob 会让
+ * 主 blob 从 64 B 涨到 ~200 B，还要升 PS_VERSION 作废现有 cal/z/ψ/齿槽。
+ * 与齿槽表同理，属"标定一次用很久"的数据，独立一页更合理。
+ *
+ * 地址 0x0807D000（倒数第三页）；ParamBlob 在 0x0807F000、齿槽表在 0x0807E000。
+ *
+ * 注意：系数不依赖编码器零点（补偿的是"磁铁/安装几何误差"，与 Z 的零点无关），
+ * 所以加载时不做零点比对，CRC 通过即恢复 —— 与齿槽表不同（齿槽表按 θ_multi
+ * 分箱，零点变了相位就偏，必须比对）。
+ */
+#define ENCCOMP_FLASH_ADDR  (0x0807D000u)
+
+/* 返回 1 = 读到且 CRC 通过。*n 返回实际阶数、*en 返回开关（可为 NULL）。 */
+uint8_t ParamStore_LoadEncComp(float *a, float *b, uint8_t *n, uint8_t *en);
+/* 返回 1 = 成功（含"内容未变、无需写"），0 = 被拒（MOE=1）或写失败。 */
+uint8_t ParamStore_SaveEncComp(const float *a, const float *b, uint8_t n, uint8_t en);
+/* 1 = 页内有通过 CRC 的系数 */
+uint8_t ParamStore_HasEncComp(void);
 
 #endif /* PARAM_STORE_H */

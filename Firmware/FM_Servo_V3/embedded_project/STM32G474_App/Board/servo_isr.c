@@ -3741,6 +3741,10 @@ void Servo_Init(void)
      * 启动时不再打 ASCII。 */
     (void)param_load_and_apply();
 
+    /* 编码器角度谐波补偿系数：独立 Flash 页，与 ParamBlob 无关。
+     * CRC 通过才应用（系数不依赖零点，故不做零点比对）。 */
+    (void)EncComp_LoadFromFlash();
+
     /* 上电就把位置环坐标对齐到单圈角（2026-11-21）。
      *
      * 必须在 param_load_and_apply() 之后：零点加载前 s_enc_zero=0，

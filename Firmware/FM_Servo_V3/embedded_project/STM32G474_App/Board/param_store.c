@@ -422,3 +422,135 @@ uint8_t ParamStore_SaveCog(const int16_t *tab, uint16_t n_bins,
 
     return (ok != 0U) ? ParamStore_HasCog() : 0U;
 }
+
+/* =========================================================================
+ * 编码器角度谐波补偿系数（单独一页）
+ * =========================================================================
+ * 布局：152 B = 19 个 doubleword。
+ *   magic(4) version(2) n_harm(2) en(2) rsv[3](6) | a[16](64) b[16](64)
+ *   | crc32(4) pad(4)
+ * crc32 覆盖之前全部字节（magic..b[15]），pad 不参与。
+ *
+ * 与齿槽表不同：这里**不做零点比对**。齿槽表按 θ_multi 分箱，重做 Z 后相位
+ * 会偏，必须比对；而谐波补偿的是"磁铁/安装几何误差"，与 Z 的零点无关，
+ * 系数本身是稳定的，CRC 通过即恢复。
+ */
+#define ENCCOMP_MAGIC    (0x45373258u)     /* 'X27E' */
+#define ENCCOMP_VERSION  (1u)
+
+typedef struct __attribute__((aligned(8))) {
+    uint32_t magic;                  /* 0 */
+    uint16_t version;                /* 4 */
+    uint16_t n_harm;                 /* 6 */
+    uint16_t en;                     /* 8 */
+    uint16_t rsv[3];                 /* 10..15 */
+    float    a[ENC_COMP_MAX_H];      /* 16..79 */
+    float    b[ENC_COMP_MAX_H];      /* 80..143 */
+    uint32_t crc32;                  /* 144 */
+    uint32_t pad;                    /* 148，凑 152 = 19 DW */
+} EncCompBlob;                        /* 152 B */
+
+typedef char ecc_size_check[((sizeof(EncCompBlob) == 152u) &&
+                             ((sizeof(EncCompBlob) % 8u) == 0u)) ? 1 : -1];
+
+static EncCompBlob s_ecbuf __attribute__((aligned(8)));
+
+static uint32_t ecc_crc(const EncCompBlob *b)
+{
+    /* 覆盖 crc32 之前的全部字节：头部 + a[] + b[] */
+    return crc32_calc((const uint8_t *)b, (uint32_t)offsetof(EncCompBlob, crc32));
+}
+
+uint8_t ParamStore_LoadEncComp(float *a, float *b, uint8_t *n, uint8_t *en)
+{
+    const EncCompBlob *src = (const EncCompBlob *)ENCCOMP_FLASH_ADDR;
+
+    if ((src->magic != ENCCOMP_MAGIC) || (src->version != ENCCOMP_VERSION)) { return 0U; }
+    if ((src->n_harm == 0U) || (src->n_harm > ENC_COMP_MAX_H))            { return 0U; }
+
+    memcpy(&s_ecbuf, src, sizeof(s_ecbuf));       /* 先落到对齐缓冲再算 CRC */
+
+    if (ecc_crc(&s_ecbuf) != s_ecbuf.crc32) { return 0U; }
+
+    if (a)  { memcpy(a, s_ecbuf.a, sizeof(s_ecbuf.a)); }
+    if (b)  { memcpy(b, s_ecbuf.b, sizeof(s_ecbuf.b)); }
+    if (n)  { *n = (uint8_t)s_ecbuf.n_harm; }
+    if (en) { *en = (s_ecbuf.en != 0U) ? 1U : 0U; }
+    return 1U;
+}
+
+uint8_t ParamStore_HasEncComp(void)
+{
+    return ParamStore_LoadEncComp(NULL, NULL, NULL, NULL);
+}
+
+uint8_t ParamStore_SaveEncComp(const float *a, const float *b, uint8_t n, uint8_t en)
+{
+    FLASH_EraseInitTypeDef er;
+    uint32_t page_err = 0U;
+    uint32_t bank = 0U, page = 0U, psize = 0U;
+    uint8_t  ok = 1U;
+    uint32_t i;
+
+    if (BspServo_IsPwmEnabled() != 0U)    { return 0U; }   /* 擦除会让桥臂冻结 */
+    if ((a == NULL) || (b == NULL))        { return 0U; }
+    if ((n == 0U) || (n > ENC_COMP_MAX_H)) { return 0U; }
+
+    memset(&s_ecbuf, 0xFF, sizeof(s_ecbuf));
+    s_ecbuf.magic   = ENCCOMP_MAGIC;
+    s_ecbuf.version = ENCCOMP_VERSION;
+    s_ecbuf.n_harm  = n;
+    s_ecbuf.en      = (en != 0U) ? 1U : 0U;
+    memcpy(s_ecbuf.a, a, (size_t)n * sizeof(float));
+    memcpy(s_ecbuf.b, b, (size_t)n * sizeof(float));
+    s_ecbuf.pad     = 0U;
+    s_ecbuf.crc32   = ecc_crc(&s_ecbuf);
+
+    /* 内容没变就不写（仿 SaveCog：直接读 Flash 指针比较，不经过 s_ecbuf，
+     * 避免"填好的待写数据被 Load 覆盖成旧数据 → 永远相等跳过写入"的别名 bug） */
+    {
+        const EncCompBlob *fw = (const EncCompBlob *)ENCCOMP_FLASH_ADDR;
+
+        if ((fw->magic   == ENCCOMP_MAGIC) &&
+            (fw->version == ENCCOMP_VERSION) &&
+            (ecc_crc(fw) == fw->crc32) &&
+            (fw->n_harm  == n) &&
+            (fw->en      == s_ecbuf.en) &&
+            (memcmp(fw->a, a, (size_t)n * sizeof(float)) == 0) &&
+            (memcmp(fw->b, b, (size_t)n * sizeof(float)) == 0)) {
+            return 1U;
+        }
+    }
+
+    if (ps_page_of_addr(ENCCOMP_FLASH_ADDR, &bank, &page, &psize) == 0U) { return 0U; }
+
+    s_ps_busy = 1U;
+    HAL_FLASH_Unlock();
+    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_ALL_ERRORS);
+
+    memset(&er, 0, sizeof(er));
+    er.TypeErase = FLASH_TYPEERASE_PAGES;
+    er.Banks     = bank;
+    er.Page      = page;
+    er.NbPages   = 1U;
+    if (HAL_FLASHEx_Erase(&er, &page_err) != HAL_OK) { ok = 0U; }
+
+    if (ok != 0U) {
+        const uint8_t *src = (const uint8_t *)&s_ecbuf;
+
+        for (i = 0U; i < (sizeof(EncCompBlob) / PS_DW); i++) {
+            uint64_t dw = 0U;
+            memcpy(&dw, src + (i * PS_DW), PS_DW);
+            if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
+                                  ENCCOMP_FLASH_ADDR + (i * PS_DW), dw) != HAL_OK) {
+                ok = 0U;
+                break;
+            }
+        }
+    }
+
+    HAL_FLASH_Lock();
+    s_ps_busy = 0U;
+
+    return (ok != 0U) ? ParamStore_HasEncComp() : 0U;
+}

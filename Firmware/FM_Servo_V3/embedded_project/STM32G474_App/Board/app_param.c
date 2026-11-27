@@ -10,6 +10,7 @@
 #include "pos_loop.h"
 #include "param_store.h"
 #include "cog_ff.h"
+#include "enc_comp.h"
 #include <string.h>
 
 /* 权限总闸：默认 0 = 上位机接管（与本板调试场景一致；参考工程默认本地，
@@ -377,6 +378,7 @@ AppParamStatus_t AppParam_ExecSysCmd(uint8_t cmd)
         }
         if (Servo_ParamSaveNow() == 0U) { return APP_PARAM_WRITE_STATE_ERROR; }
         (void)CogFf_SaveToFlash();        /* 无有效齿槽表时内部自行跳过 */
+        (void)EncComp_SaveToFlash();      /* 无有效补偿系数时内部自行跳过 */
         return APP_PARAM_SUCCESS;
     case APP_SYS_CMD_CLEAR_FAULT:
         if (ServoCmd_ClearFault() == 0U) { return APP_PARAM_WRITE_STATE_ERROR; }

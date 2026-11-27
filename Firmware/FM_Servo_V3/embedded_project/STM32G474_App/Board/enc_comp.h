@@ -38,4 +38,10 @@ uint8_t EncComp_GetEnable(void);
  * 关闭时返回 0，调用方不需要判断。 */
 float   EncComp_Eval(float theta_m);
 
+/* 掉电保存：系数与开关落盘到独立 Flash 页（param_store 的 0x0807D000）。
+ * Load 在初始化时调用，CRC 通过才应用（系数不依赖编码器零点，故不比对零点）。
+ * Save 在"存参"（action=1）时调用，内部检查 MOE=0，返回 1=成功。 */
+uint8_t EncComp_LoadFromFlash(void);
+uint8_t EncComp_SaveToFlash(void);
+
 #endif /* ENC_COMP_H */
