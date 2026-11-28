@@ -316,8 +316,8 @@ void CanProto_GetStats(uint16_t *tx, uint16_t *rx, uint16_t *err,
  */
 #define CAN_TEST_ID        (0x100u)      /* CMD_AGG 段，正式协议也用这个 ID */
 #define CAN_ECHO_ID        (0x101u)      /* ping-pong 回显通道 */
-#define CAN_TEST_DLC       (FDCAN_DLC_BYTES_24)
-#define CAN_TEST_BYTES     (24u)
+#define CAN_TEST_DLC       (FDCAN_DLC_BYTES_64)
+#define CAN_TEST_BYTES     (64u)
 #define CAN_TEST_TMO_MS    (600000u)
 
 
