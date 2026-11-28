@@ -192,13 +192,16 @@ static uint8_t finite_f(float v) { return (v == v) ? 1U : 0U; }  /* NaN -> 0 */
 /* ---- 速度给定协议门卫上限（rad/s）----
  * 原为 ±100 rad/s（955 rpm），是首期保守值。2026-11-19 温漂长测需要 1000 rpm
  * （=104.72 rad/s）却被门卫直接拒成 OUT_OF_RANGE，故抬到 ±220 rad/s（≈2101 rpm）。
- * 依据：
+ * 2026-11-26 再抬到 ±314 rad/s（=3000 rpm）：全速度加载扫描要求覆盖 0–3000 rpm，
+ * 而 2500/3000 的给定会被 220 直接拒掉（现象是 wref 不更新 → deadman 断使能，
+ * 看起来像"高速失速"）。依据：
  *   1) 内部 Servo_SetSpeedMode() 有 SERVO_SPD_WREF_MAX=400 rad/s（≈3820 rpm）
- *      硬限（servo_isr.c:587），220 仍留 45% 余量；
- *   2) 覆盖本板历史实测过的 2000 rpm（209.4 rad/s）与本次 1000 rpm；
+ *      硬限，314 仍留 21% 余量；
+ *   2) 覆盖 2026-11-26 加载测试实测的 2000/2100 rpm，并为 3000 rpm 留出通道；
  *   3) 超出仍是明确 OUT_OF_RANGE，不静默截断（静默夹曾被误读成电机极限）。
- * 注意：这是协议门卫，不是电机能力边界；真正到不了应由母线电压/超速保护暴露。 */
-#define APP_SPD_W_MAX_RADS   (220.0f)
+ * 注意：这是协议门卫，不是电机能力边界；真正到不了应由母线电压/超速保护暴露。
+ *       速度模式另有动态超速门限 1.5·|wpeak|+10，二者独立。 */
+#define APP_SPD_W_MAX_RADS   (314.0f)
 
 AppParamStatus_t AppParam_SetTorqueIq(float iq_a)
 {

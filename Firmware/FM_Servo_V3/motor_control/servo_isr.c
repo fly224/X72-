@@ -371,7 +371,12 @@ int8_t Servo_GetDirSign(void)       { return s_dir_sign; }
  * 比电流环自身的响应（~200 µs）略快，超限后能及时把积分拉回来又不会振。
  * 与速度环的 s_spd_kb=0.30 保持一致。 */
 #define SERVO_CUR_KB         (0.30f)
-#define SERVO_CUR_IQ_MAX     (5.0f)
+/* 力矩/MIT 的 iq 上限。原 5.0 A（2026-11-27 之前）：5×Kt = 0.45 N·m 电机端
+ * ≈ 4.1 N·m 输出端，正好贴着额定 4.0 N·m 所需力矩，一点余量都不剩，
+ * 实测表现是"MIT 加载后位置完全推不动、iq 卡在 4.96 A"（270° 往返测试）。
+ * 2026-11-27 提到 10.0 A（用户为硬件负责人，确认功率级可承受）。
+ * 提高限幅只扩大能力上限，不改变已有工况的实际出力。 */
+#define SERVO_CUR_IQ_MAX     (10.0f)
 
 /* 力矩常数 Kt = 1.5·p·ψ，用**实测** ψ=4.333 mWb（`+` 联合辨识，dev=1.85%）
  * 算得 0.0910 N·m/A。与 mech_ident.c 的 MI2_KT 必须一致，否则同一台机器
@@ -562,6 +567,20 @@ static volatile float    s_mit_dt;        /* 上拍实际用到的帧龄（s）�
 #define SERVO_MIT_CMD_TMO_MS (20U)
 #define SERVO_MIT_TAU_MAX    (1.5f)       /* 力矩限幅 N·m（≈16 A，实际先被 iq 限幅兜住） */
 #define SERVO_MIT_KP_MAX     (2000.0f)
+/* MIT 摩擦前馈的换向过渡宽度（rad/s，2026-11-27）。
+ *
+ * 为什么需要这一项：MIT 是纯 PD（τ = kp·e + kd·ė + τ_ff），**没有积分**，
+ * 所以摩擦/齿槽造成的死区无法靠累积误差消掉。实测 0.1 rad @ 1 Hz 的幅值衰减
+ * 恒为 15%，且 kp 30→20、kd 0.1→0.02 都改不动 —— 说明是摩擦而非阻尼不足。
+ * 死区由 T4 阶跃反推约 22.7 mrad（输出端），kp=20 时需 ~0.45 N·m 才能起动。
+ *
+ * 为什么用 vdes 而不是 v_est 判方向：v_est 是 100 µs 双拍差分，噪声峰峰
+ * 3.4 rad/s（见 T5 反推），直接取 sign 会变成方波激励，反而加剧噪声。
+ * vdes 是上位机给定，干净；且 vdes=0 时 tanh 自然为 0，不影响静止保持精度。
+ *
+ * 幅值复用速度模式的 s_ff_fric（30082 float[9]，单位 A）——
+ * 该参数在 MIT 下本来闲置，正好用来做运行时可调的 A/B（设 0 即关闭）。 */
+#define SERVO_MIT_FRIC_EPS   (0.15f)
 /* MIT 的超速门限独立：不能在 v_des 之外只加 10 rad/s。
  *
  * MIT 的力矩是 kp·e，位置阶跃时 e 一下子就是几十毫弧度，即使 kp 只有 3，
@@ -571,8 +590,12 @@ static volatile float    s_mit_dt;        /* 上拍实际用到的帧龄（s）�
  *
  * 30 rad/s ≈ 286 rpm 是关节类应用的合理上限：正常 MIT 运动够用，
  * 真失控（编码器断线、dir 判错）仍会撞线。
+ *
+ * 30 → 50（2026-11-27）：整形器 VMAX 提到 30 后，门限 1.5·|v_des|+30 在
+ * v_des=0 时正好等于整形速度，一点余量都没有，运动中任何超调都撞线。
+ * 50 rad/s = 477 rpm，相对 30 rad/s 的整形速度留 40% 余量，仍远低于电机能力。
  */
-#define SERVO_MIT_WMAX       (30.0f)
+#define SERVO_MIT_WMAX       (50.0f)
 #define SERVO_MIT_KD_MAX     (50.0f)
 
 /* ---- 目标整形：把阶跃变成限速斜坡（2026-11-22）----
@@ -598,7 +621,13 @@ static volatile float    s_mit_dt;        /* 上拍实际用到的帧龄（s）�
 #define SERVO_MIT_SHAPE_EN (1)            /* 0 = 关闭整形，回到 p_des 直接执行 */
 #endif
 #ifndef SERVO_MIT_SHAPE_VMAX
-#define SERVO_MIT_SHAPE_VMAX (15.0f)      /* rad/s ≈ 143 rpm，整形目标的最大速度 */
+/* 整形目标的最大速度（电机端 rad/s）。
+ * 15 → 30（2026-11-27）：270° 往返要 42.4 rad 行程，15 rad/s 下单程 3.2 s 偏慢。
+ * 30 rad/s = 286 rpm（电机端）= 3.33 rad/s 输出端 = 191°/s，单程约 1.5 s。
+ * ⚠ 提速的代价在 kd 项：阻尼力矩 = kd × ω，ω=30 时 kd=0.06 就是 1.8 N·m，
+ * 已超 SERVO_MIT_TAU_MAX(1.5)。所以高速工况必须同时把 kd 调小（运行时改 30066，
+ * 不必重编译）——额定载荷下建议 kd ≤ 0.02。 */
+#define SERVO_MIT_SHAPE_VMAX (30.0f)
 #endif
 /* 加速度上限 = VMAX × 这个比例。只限速度不限加速度时，起步那一拍 v 从 0 跳到
  * 15 rad/s，加速度是无穷大 —— 实测 iq 峰 4.47 A（接近 5 A 限幅）、rpm 峰 149.9。
@@ -607,9 +636,18 @@ static volatile float    s_mit_dt;        /* 上拍实际用到的帧龄（s）�
 #define SERVO_MIT_SHAPE_A_RATIO (12.0f)   /* amax = 12×VMAX ≈ 180 rad/s² */
 #endif
 /* 位置差 → 期望速度的比例（1/s）。12 对应 83 ms 时间常数，配合上面的 amax
- * 是一条"加速—匀速—减速"的准梯形曲线，不会像纯限速那样冲到位再刹。 */
+ * 是一条"加速—匀速—减速"的准梯形曲线，不会像纯限速那样冲到位再刹。
+ *
+ * 12 → 30（2026-11-27）：MIT 的跟随衰减完全由这个整形器的一阶低通决定，
+ * 与 kp/kd/摩擦/位置都无关。实测 0.25/0.5/1/2/3 Hz 衰减 1.0/3.6/11.5/32.3/48.6%，
+ * 与 A/A0=1/√(1+(2πf/12)²) 理论值误差 <2 个百分点，且 0.03 与 0.10 rad 两幅值
+ * 曲线完全重合（线性系统特征）。提到 30 后 τ 从 83 ms 降到 33 ms，
+ * 1 Hz 衰减预计 11.4% → 1.6%。
+ *
+ * 不牺牲阶跃安全：整形器是"比例+限速"结构，阶跃时 vs 被 VMAX 卡住，
+ * KP 只影响小误差段的收敛快慢，不改阶跃时的最大速度。 */
 #ifndef SERVO_MIT_SHAPE_KP
-#define SERVO_MIT_SHAPE_KP (12.0f)
+#define SERVO_MIT_SHAPE_KP (30.0f)
 #endif
 
 /* ---- 给定外推（一阶保持，2026-11-18）----
@@ -2820,6 +2858,24 @@ void Servo_ControlTick(void)
                 }
                 const float om_d = (float)s_dir_sign * v_est;
                 float tau = (s_mit_kp * epc) + (s_mit_kd * (vdes - om_d)) + s_mit_tau;
+
+                /* 摩擦前馈（2026-11-27 实验项，见 SERVO_MIT_FRIC_EPS 的说明）。
+                 * s_ff_fric 单位是 A（速度模式里直接加在 iq 上），这里乘 Kt 换成力矩。
+                 *
+                 * 【A/B 结论：默认关闭】实测 ff_fric=2.0 A（0.18 N·m）时：
+                 *     0.03 rad@1Hz 衰减 12.5% → 12.3%（无改善）
+                 *     0.10 rad@1Hz 衰减 11.6% → 15.9%（恶化）
+                 *     iq 峰峰 2.04 → 8.43 A（4.1 倍）
+                 *     ff_fric=3.5 A 时位置偏离 0.334 rad 并撞 0x0020
+                 * 原因是纯 PD 无积分，前馈误差没人兜；且 vdes 与实际速度有 44° 相位差，
+                 * 过零附近前馈变成助推。与齿槽前馈失败同因。
+                 *
+                 * 因此加 0.5 A 闸门：速度模式默认 0.107 A 不会触发，
+                 * 只有主动把 30082 float[9] 写成 >0.5 才启用（保留实验入口）。 */
+                if (s_ff_fric > 0.5f) {
+                    tau += s_ff_fric * (s_kt_base * s_kt_comp)
+                         * tanhf(vdes / SERVO_MIT_FRIC_EPS);
+                }
 
                 /* 【2026-11-18 实测后撤回】这里曾加过齿槽前馈：
                  *     tau += Kt * CogFf_Get(theta_multi, COG_FF_W_FULL);

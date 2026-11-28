@@ -81,6 +81,13 @@ static uint16_t s_adc1_regular[4];          /* ADC1 常规 DMA：IN1(VBUS)/温�
 #define NTC_PERIOD_MS    100U              /* 10 Hz：热时间常数为秒级，够用 */
 #define NTC_TIMEOUT_MS   50U               /* 转换迟迟不回来（被注入长期占用）→ 判失败重来 */
 
+/* ---------------- 过温门限（2026-11-26 新增） ----------------
+ * 电机 70 °C 为用户指定值；驱动侧 GaN 取 85 °C —— GaN 结温上限远高于绕组，
+ * 用 70 °C 会过早限制出力，且 U14 探头测的是外壳/散热器温度而非结温。
+ * 故障位定义与锁存行为见 bsp_servo.h 的 BSP_FAULT_OVERTEMP_MOTOR/GAN。 */
+#define BSP_OVERTEMP_MOTOR_C   (70.0f)
+#define BSP_OVERTEMP_GAN_C     (85.0f)
+
 static uint16_t          s_ntc_raw[2];      /* DMA 目标：[0]=NTC_GAN [1]=NTC_MOTOR */
 static volatile uint8_t  s_ntc_state;       /* 0=空闲 1=转换中 2=数据就绪 */
 static uint16_t          s_ntc_div;
@@ -886,6 +893,16 @@ void BspServo_SlowTask1ms(void)
         s_ntc_state = 0U;
         s_temp_gan   = Ntc_CodeToCelsius(s_ntc_raw[0], NTC_GAN_R25, NTC_GAN_BETA);
         s_temp_motor = Ntc_CodeToCelsius(s_ntc_raw[1], NTC_MOT_R25, NTC_MOT_BETA);
+
+        /* 过温保护（2026-11-26）：放在 10 Hz 的 NTC 换算之后，而不是 20 kHz 的
+         * 电流环 ISR —— 温度是慢变量，100 ms 的响应延迟对热保护完全够用，
+         * 也避免在 ISR 里做浮点比较。置位即封锁 MOE（与其它故障同一路径）。 */
+        if (s_temp_motor > BSP_OVERTEMP_MOTOR_C) {
+            BspServo_RaiseFault(BSP_FAULT_OVERTEMP_MOTOR);
+        }
+        if (s_temp_gan > BSP_OVERTEMP_GAN_C) {
+            BspServo_RaiseFault(BSP_FAULT_OVERTEMP_GAN);
+        }
         s_ntc_ok++;
         s_ntc_div = 0U;
     } else if (s_ntc_state == 0U) {                 /* 空闲 → 到点启动 */
